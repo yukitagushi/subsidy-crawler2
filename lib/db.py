@@ -1,6 +1,6 @@
 import os, psycopg
 from contextlib import contextmanager
-from .util import content_hash
+from pathlib import Path
 
 DSN = os.getenv("DATABASE_URL")
 
@@ -8,6 +8,15 @@ DSN = os.getenv("DATABASE_URL")
 def conn():
     with psycopg.connect(DSN, autocommit=True) as c:
         yield c
+
+def ensure_schema():
+    """
+    schema.sql を適用（CREATE TABLE IF NOT EXISTS を想定）。
+    何度呼んでも安全。
+    """
+    sql = Path("schema.sql").read_text(encoding="utf-8")
+    with conn() as c:
+        c.execute(sql)
 
 def upsert_http_meta(c, url: str, etag: str | None, last_mod: str | None, status: int):
     cur = c.cursor()
@@ -24,6 +33,9 @@ def upsert_http_meta(c, url: str, etag: str | None, last_mod: str | None, status
 def log_fetch(c, url: str, status: str, took_ms: int, err: str | None=None):
     c.execute("insert into fetch_log(url,status,took_ms,error) values(%s,%s,%s,%s)",
               (url, status, took_ms, err))
+
+# ---- ここからページ保存系 ----
+from .util import content_hash
 
 def upsert_page(c, row: dict):
     row = dict(row)
