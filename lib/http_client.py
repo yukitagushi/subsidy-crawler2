@@ -21,15 +21,15 @@ def head_ok(u: str, ct=3, rt=5) -> bool:
         return False
 
 def conditional_fetch(u: str, etag: str | None, last_mod: str | None):
-    """If-None-Match / If-Modified-Since を付けて取得。304なら (None, etag, last_mod) を返す。"""
     hdr = dict(HEADERS)
     if etag: hdr["If-None-Match"] = etag
     if last_mod: hdr["If-Modified-Since"] = last_mod
     t0 = time.time()
     r = S.get(u, headers=hdr, timeout=(CONNECT, READ))
     took_ms = int((time.time() - t0) * 1000)
-    r.raise_for_status() if r.status_code != 304 else None
-    new_etag = r.headers.get("ETag") or etag
-    new_lm   = r.headers.get("Last-Modified") or last_mod
-    return (None if r.status_code == 304 else r.text, new_etag, new_lm, r.status_code, took_ms)
+    ctype = (r.headers.get("Content-Type") or "").split(";")[0].lower()
+    if r.status_code == 304:
+        return None, etag, last_mod, ctype, r.status_code, took_ms
+    r.raise_for_status()
+    return r.text, r.headers.get("ETag") or etag, r.headers.get("Last-Modified") or last_mod, ctype, r.status_code, took_ms
     
