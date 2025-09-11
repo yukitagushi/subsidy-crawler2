@@ -1,0 +1,26 @@
+name: Prune DB
+on:
+  schedule: [ { cron: "30 2 * * *" } ]   # 毎日 02:30 (UTC)
+  workflow_dispatch: {}
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: "pip" }
+      - run: python -m pip install -U pip setuptools wheel
+      - run: pip install "psycopg[binary]>=3.1.18,<3.3"
+      - name: Run prune
+        run: |
+          python - <<'PY'
+          import os, psycopg, pathlib
+          dsn = os.getenv("DATABASE_URL")
+          assert dsn, "No DATABASE_URL"
+          sql = pathlib.Path("prune.sql").read_text()
+          with psycopg.connect(dsn, autocommit=True) as c:
+              c.execute(sql)
+          print("prune done")
+          PY
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
