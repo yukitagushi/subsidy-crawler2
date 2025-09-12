@@ -20,26 +20,16 @@ R = Retry(total=3, connect=3, read=0, backoff_factor=1.2,
 A = HTTPAdapter(max_retries=R, pool_maxsize=32)
 S.mount("https://", A); S.mount("http://", A)
 
-def conditional_fetch(u: str, etag: str | None, last_mod: str | None):
-    # ★ FORCE_REFRESH=1 のときは条件ヘッダを外して“必ず本文(200)”を取りに行く
-    if os.getenv("FORCE_REFRESH", "0") == "1":
-        etag = None; last_mod = None
-
+def conditional_fetch(u, etag, last_mod):
     host = urlsplit(u).netloc
     rt = HOST_READ.get(host, READ)
     hdr = dict(HEADERS)
     if etag:     hdr["If-None-Match"] = etag
     if last_mod: hdr["If-Modified-Since"] = last_mod
-
-    t0 = time.time()
-    r = S.get(u, headers=hdr, timeout=(CONNECT, rt))
-    took_ms = int((time.time()-t0)*1000)
-    ctype = (r.headers.get("Content-Type") or "").split(";")[0].lower()
-
-    if r.status_code == 304:
-        return None, etag, last_mod, ctype, r.status_code, took_ms
-
+    t0=time.time()
+    r=S.get(u, headers=hdr, timeout=(CONNECT, rt))
+    took=int((time.time()-t0)*1000)
+    ctype=(r.headers.get("Content-Type") or "").split(";")[0].lower()
+    if r.status_code==304: return None, etag, last_mod, ctype, r.status_code, took
     r.raise_for_status()
-    new_etag = r.headers.get("ETag") or etag
-    new_lm   = r.headers.get("Last-Modified") or last_mod
-    return r.text, new_etag, new_lm, ctype, r.status_code, took_ms
+    return r.text, r.headers.get("ETag") or etag, r.headers.get("Last-Modified") or last_mod, ctype, r.status_code, took
