@@ -1,15 +1,15 @@
 allowed_hosts:
   - www.chusho.meti.go.jp
-  - chusho.meti.go.jp              # ← 追加（www無し）
+  - chusho.meti.go.jp
   - www.meti.go.jp
-  - meti.go.jp                     # ← 追加（www無し）
+  - meti.go.jp
   - www.jgrants-portal.go.jp
-  - jgrants-portal.go.jp           # ← 追加（www無し）
+  - jgrants-portal.go.jp
 
 sources:
   - name: 中小企業庁_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    include: []                    # ← いったん広げる（後から絞る）
+    include: []   # ← まずは広く。落ち着いたら絞り込む
     exclude: []
     max_new: 40
 

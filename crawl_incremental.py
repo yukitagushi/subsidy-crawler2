@@ -10,71 +10,28 @@ from urllib.parse import urlsplit, urljoin
 
 from bs4 import BeautifulSoup
 
-from lib.http_client import conditional_fetch  # 条件付き GET（304 対応）
-from lib.extractors import extract_from_html
+from lib.http_client import conditional_fetch
+from lib.extractors import extract_from_html, extract_from_text
 from lib.db import conn, upsert_http_meta, upsert_page, log_fetch, ensure_schema
 
-# --- オプション：Tavily raw フォールバック（キーが無ければ自動無効） ---
+# ---- Tavily raw fallback（キーが無ければ自動で無効） ----
 try:
     from tavily import TavilyClient  # pip: tavily-python
 except Exception:
-    TavilyClient = None  # 型だけ用意
+    TavilyClient = None
 
 TAVILY_KEY = os.getenv("TAVILY_API_KEY")
 tv = TavilyClient(api_key=TAVILY_KEY) if (TAVILY_KEY and TavilyClient) else None
 
-# --- extract_from_text（lib.extractors に無ければこの簡易版を使う） ---
-try:
-    from lib.extractors import extract_from_text  # あればこちらを使用
-except Exception:
-    import re as _re
-    from lib.util import norm_ws as _norm_ws, clip as _clip
-
-    def extract_from_text(url: str, text: str) -> dict:
-        t = _norm_ws(text or "")
-        title = "(無題)"
-        m = _re.search(r"^(.{8,80})$", t, flags=_re.M)
-        if m:
-            title = _norm_ws(m.group(1))
-        rate = None
-        m = _re.search(r"補助率[\s:：]*([0-9０-９]+ ?%?)", t)
-        if m:
-            rate = _norm_ws(m.group(1))
-        cap = None
-        m = _re.search(r"上限[\s:：]*([0-9０-９,，]+ ?(?:円|万円|億円)?)", t)
-        if m:
-            cap = _norm_ws(m.group(1))
-        fiscal_year = None
-        m = _re.search(r"(令和\s*[0-9０-９]+年度|20[0-9]{2}年度)", t)
-        if m:
-            fiscal_year = _norm_ws(m.group(1))
-
-        return {
-            "url": url,
-            "title": title or "(無題)",
-            "summary": _clip(t[:800], 800),
-            "rate": rate,
-            "cap": cap,
-            "target": None,
-            "cost_items": None,
-            "deadline": None,
-            "fiscal_year": fiscal_year,
-            "call_no": None,
-            "scheme_type": None,
-            "period_from": None,
-            "period_to": None,
-        }
-
-
-# -------- 設定（環境変数で上書き可） --------
-TIME_BUDGET_SEC = int(os.getenv("TIME_BUDGET_SEC", "240"))
+# -------- 設定（ENVで上書き可） --------
+TIME_BUDGET_SEC   = int(os.getenv("TIME_BUDGET_SEC", "240"))
 MAX_PAGES_PER_RUN = int(os.getenv("MAX_PAGES_PER_RUN", "60"))
-MAX_PER_DOMAIN = int(os.getenv("MAX_PER_DOMAIN", "25"))
+MAX_PER_DOMAIN    = int(os.getenv("MAX_PER_DOMAIN", "25"))
 
 DOC_TYPES: Set[str] = {"text/html", "application/xhtml+xml", "application/pdf"}
 ASSET_RE = re.compile(
-    r"\.(js|mjs|css|png|jpe?g|gif|svg|ico|json|map|woff2?|ttf|eot|mp4|webm)($|\?)",
-    re.I,
+    r'\.(js|mjs|css|png|jpe?g|gif|svg|ico|json|map|woff2?|ttf|eot|mp4|webm)($|\?)',
+    re.I
 )
 
 ALLOWED_HOSTS: Set[str] = set()
@@ -105,7 +62,7 @@ def load_seeds(path: str = "seeds.yaml") -> List[dict]:
 
 
 def extract_links(base_url: str, html: str) -> List[str]:
-    """a[href] だけを収集。script/link等は拾わない。"""
+    """a[href] だけを抽出。script/link等は拾わない。"""
     soup = BeautifulSoup(html, "html.parser")
     out: List[str] = []
     for a in soup.find_all("a", href=True):
@@ -140,7 +97,7 @@ def crawl() -> None:
             exclude = [re.compile(p) for p in src.get("exclude", [])]
             max_new = int(src.get("max_new", 20))
 
-            # 既存のETag/LM
+            # 既存 ETag/LM
             cur = c.cursor()
             cur.execute(
                 "select etag, last_modified from http_cache where url=%s", (list_url,)
@@ -184,7 +141,7 @@ def crawl() -> None:
                 if per_domain[host] > MAX_PER_DOMAIN:
                     continue
 
-                # 既存ETag/LM
+                # 既存 ETag/LM
                 cur.execute(
                     "select etag, last_modified from http_cache where url=%s", (u,)
                 )
@@ -213,8 +170,8 @@ def crawl() -> None:
                     # ---- フォールバック：Tavily raw_content ----
                     if tv:
                         try:
-                            # まずは extract API が使えるなら優先（無ければ search で代替）
                             raw = None
+                            # extract API が使えれば優先
                             if hasattr(tv, "extract"):
                                 raw = tv.extract(u).get("content")  # type: ignore[attr-defined]
                             if not raw:
@@ -239,7 +196,7 @@ def crawl() -> None:
                             log_fetch(c, u, "ng", 0, f"fallback error: {e2}")
                             continue
 
-                    # フォールバック不可ならそのまま ng
+                    # フォールバック不可なら ng
                     log_fetch(c, u, "ng", 0, str(e))
                     continue
 
