@@ -1,24 +1,26 @@
 allowed_hosts:
   - www.chusho.meti.go.jp
+  - chusho.meti.go.jp              # ← 追加（www無し）
   - www.meti.go.jp
+  - meti.go.jp                     # ← 追加（www無し）
   - www.jgrants-portal.go.jp
-  - jgrants.go.jp
+  - jgrants-portal.go.jp           # ← 追加（www無し）
 
 sources:
   - name: 中小企業庁_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]
+    include: []                    # ← いったん広げる（後から絞る）
     exclude: []
-    max_new: 30
+    max_new: 40
 
   - name: 中小企業庁_IT_案内
     url: https://www.chusho.meti.go.jp/shogyo/shogyo/hojyokin/it.html
-    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]
+    include: []
     exclude: []
-    max_new: 10
+    max_new: 30
 
   - name: JGrants
     url: https://www.jgrants-portal.go.jp/
     include: []
     exclude: []
-    max_new: 10
+    max_new: 30
