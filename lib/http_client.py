@@ -2,9 +2,9 @@ import os, time, requests
 from urllib.parse import urlsplit
 from requests.adapters import HTTPAdapter, Retry
 
-CONNECT = int(os.getenv("CONNECT_TIMEOUT", "10"))
-READ    = int(os.getenv("READ_TIMEOUT", "35"))
-HOST_READ = { "www.chusho.meti.go.jp": int(os.getenv("CHUSHO_READ_TIMEOUT", "45")) }
+CONNECT = int(os.getenv("CONNECT_TIMEOUT", "12"))
+READ    = int(os.getenv("READ_TIMEOUT", "45"))
+HOST_READ = { "www.chusho.meti.go.jp": int(os.getenv("CHUSHO_READ_TIMEOUT", "75")) }
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -21,7 +21,7 @@ A = HTTPAdapter(max_retries=R, pool_maxsize=32)
 S.mount("https://", A); S.mount("http://", A)
 
 def conditional_fetch(u: str, etag: str | None, last_mod: str | None):
-    # ★ 304回避の一時スイッチ（crawl.ymlで FORCE_REFRESH=1 のとき）
+    # ★ FORCE_REFRESH=1 のときは条件ヘッダを外して“必ず本文(200)”を取りに行く
     if os.getenv("FORCE_REFRESH", "0") == "1":
         etag = None; last_mod = None
 
