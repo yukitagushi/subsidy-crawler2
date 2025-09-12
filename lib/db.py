@@ -14,7 +14,7 @@ def ensure_schema():
     sql = Path("schema.sql").read_text(encoding="utf-8")
     with conn() as c: c.execute(sql)
 
-def upsert_http_meta(c, url: str, etag: str | None, last_mod: str | None, status: int):
+def upsert_http_meta(c, url, etag, last_mod, status):
     cur = c.cursor()
     cur.execute("""
       insert into public.http_cache(url, etag, last_modified, last_status, last_checked_at, last_changed_at)
@@ -27,18 +27,16 @@ def upsert_http_meta(c, url: str, etag: str | None, last_mod: str | None, status
         last_status=excluded.last_status, last_checked_at=now();
     """, (url, etag, last_mod, status, etag or "", url, last_mod or "", url, url))
 
-def log_fetch(c, url: str, status: str, took_ms: int, err: str | None):
+def log_fetch(c, url, status, took_ms, err):
     c.execute("insert into public.fetch_log(url,status,took_ms,error) values(%s,%s,%s,%s)",
               (url, status, took_ms, err))
 
 def upsert_page(c, row: dict) -> bool:
-    row = dict(row)
-    row["content_hash"] = content_hash(row)
+    row = dict(row); row["content_hash"] = content_hash(row)
     cur = c.cursor()
     cur.execute("select content_hash from public.pages where url=%s", (row["url"],))
     prev = cur.fetchone()
-    if prev and prev[0] == row["content_hash"]:
-        return False
+    if prev and prev[0] == row["content_hash"]: return False
     cols = ["url","title","summary","rate","cap","target","cost_items","deadline",
             "fiscal_year","call_no","scheme_type","period_from","period_to","content_hash"]
     vals = [row.get(k) for k in cols]
