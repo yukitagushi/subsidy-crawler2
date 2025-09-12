@@ -13,7 +13,6 @@ def extract_from_html(url: str, html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     title = norm_ws(soup.title.text if soup.title else "") \
         or _meta(soup, ("property","og:title"), ("name","twitter:title"))
-
     desc = _meta(soup, ("name","description"), ("property","og:description"))
     summary = desc or (norm_ws(soup.find("p").get_text(" ")) if soup.find("p") else "")
     if not title: title = (summary[:40] or "(無題)")
@@ -51,7 +50,7 @@ def extract_from_text(url: str, text: str) -> dict:
     if m: title = norm_ws(m.group(1))
     rate=None; m=re.search(r"補助率[\s:：]*([0-9０-９]+ ?%?)", t);            rate=norm_ws(m.group(1)) if m else None
     cap =None; m=re.search(r"上限[\s:：]*([0-9０-９,，]+ ?(?:円|万円|億円)?)", t); cap =norm_ws(m.group(1)) if m else None
-    fy = None; m=re.search(r"(令和\s*[0-9０-９]+年度|20[0-9]{2}年度)", t);     fy  =norm_ws(m.group(1)) if m else None
+    fy  =None; m=re.search(r"(令和\s*[0-9０-９]+年度|20[0-9]{2}年度)", t);     fy  =norm_ws(m.group(1)) if m else None
     return {
         "url": url, "title": title or "(無題)", "summary": clip(t[:800], 800),
         "rate": rate, "cap": cap, "target": None, "cost_items": None,
