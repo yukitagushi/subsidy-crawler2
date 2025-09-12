@@ -1,6 +1,6 @@
 name: Crawl Subsidies
 on:
-  schedule: [ { cron: "5 * * * *" } ]     # 毎時05分（UTC）
+  schedule: [ { cron: "5 * * * *" } ]
   workflow_dispatch: {}
 
 jobs:
@@ -14,23 +14,20 @@ jobs:
       - run: python -m pip install -U pip setuptools wheel
       - run: pip install -r requirements.txt
 
-      - name: Run incremental crawler
+      - name: Run orchestrator
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BING_SEARCH_KEY: ${{ secrets.BING_SEARCH_KEY }}
 
-          # --- 速攻モード（3分で数を増やす）---
+          # 速攻モード（3分）：並列・短めタイムアウト
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "25"
           CHUSHO_READ_TIMEOUT: "35"
-          TIME_BUDGET_SEC: "180"         # 3分
+          TIME_BUDGET_SEC: "180"
           MAX_PAGES_PER_RUN: "60"
           MAX_PER_DOMAIN: "20"
-
-          # 並列（6並列 / ホストごと2本）
           PARALLEL_WORKERS: "6"
           PER_HOST_LIMIT: "2"
-
-          # SPA対策の候補発見（Tavily）
           USE_TAVILY_DISCOVERY: "1"
-          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}   # ← ある場合だけ有効化
-        run: python crawl_incremental.py
+          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: python orchestrator.py
