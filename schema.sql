@@ -1,5 +1,5 @@
--- 最小の抽出済テーブル（生HTMLは保存しない）
-create table if not exists pages(
+-- pages
+create table if not exists public.pages(
   url           text primary key,
   title         text not null,
   summary       text,
@@ -16,24 +16,32 @@ create table if not exists pages(
   content_hash  text,
   last_fetched  timestamptz default now()
 );
+do $$ begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema='public' and table_name='pages' and column_name='tokens')
+  then
+    alter table public.pages
+      add column tokens tsvector generated always as
+        (to_tsvector('simple',
+          coalesce(title,'')||' '||coalesce(summary,'')||' '||
+          coalesce(target,'')||' '||coalesce(cost_items,''))) stored;
+    create index if not exists idx_pages_tokens on public.pages using gin(tokens);
+    create index if not exists idx_pages_last   on public.pages(last_fetched desc);
+  end if;
+end $$;
 
--- 検索用トークン（生成列）
-alter table pages
-  add column if not exists tokens tsvector
-  generated always as (
-    to_tsvector('simple',
-      coalesce(title,'') || ' ' ||
-      coalesce(summary,'') || ' ' ||
-      coalesce(target,'') || ' ' ||
-      coalesce(cost_items,'')
-    )
-  ) stored;
+-- fetch_log
+create table if not exists public.fetch_log(
+  id         bigserial primary key,
+  url        text,
+  status     text,
+  took_ms    integer,
+  error      text,
+  fetched_at timestamptz default now()
+);
 
-create index if not exists idx_pages_tokens on pages using gin(tokens);
-create index if not exists idx_pages_last   on pages(last_fetched desc);
-
--- URLごとのHTTPメタ（ETag/Last-Modified で条件付きGET）
-create table if not exists http_cache(
+-- http_cache
+create table if not exists public.http_cache(
   url             text primary key,
   etag            text,
   last_modified   text,
@@ -41,14 +49,3 @@ create table if not exists http_cache(
   last_checked_at timestamptz,
   last_changed_at timestamptz
 );
-
--- フェッチログ（軽量）
-create table if not exists fetch_log(
-  id         bigserial primary key,
-  url        text,
-  status     text,         -- "ok" / "ng" / "304" / "skip"
-  took_ms    integer,
-  error      text,
-  fetched_at timestamptz default now()
-);
-create index if not exists idx_fetch_log_time on fetch_log(fetched_at desc);
