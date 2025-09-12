@@ -7,24 +7,22 @@ allowed_hosts:
   - jgrants-portal.go.jp
 
 sources:
-  # 中小企業庁は「k番号」の個別公募ページを狙う
-  - name: 中小企業庁_公募一覧
+  - name: 中小_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]
+    include: []     # まずは広く。数が増えたら /koukai/koubo/20\d{2}/k\d+\.html に絞る
     exclude: []
     max_new: 60
 
-  - name: 中小企業庁_IT_案内
+  - name: 中小_IT案内
     url: https://www.chusho.meti.go.jp/shogyo/shogyo/hojyokin/it.html
-    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]
+    include: []
     exclude: []
     max_new: 40
 
-  # jGrants は SPA なので Tavily discovery で候補を見つける
   - name: JGrants_discovery
     url: https://www.jgrants-portal.go.jp/
     discover: tavily
-    query: "site:jgrants-portal.go.jp 公募 申請 補助金 2025"
-    include: []       # discovery結果も doc-only/allowed_hosts で絞り込みます
+    query: "site:jgrants-portal.go.jp 公募 募集 申請 補助金 2025"
+    include: []
     exclude: []
     max_new: 40
