@@ -17,17 +17,11 @@ jobs:
       - name: Run incremental crawler
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-          # 通常運用のHTTPタイムアウト（必要に応じて微調整）
           CONNECT_TIMEOUT: "12"
           READ_TIMEOUT: "45"
           CHUSHO_READ_TIMEOUT: "75"
-
-          # 合計時間/件数（運用値）
           TIME_BUDGET_SEC: "480"
           MAX_PAGES_PER_RUN: "120"
           MAX_PER_DOMAIN: "50"
-
-          # 任意：フォールバックを使うなら Secrets にセット
           # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: python crawl_incremental.py
