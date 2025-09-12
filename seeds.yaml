@@ -1,4 +1,3 @@
-# seeds.yaml（増やす用）
 allowed_hosts:
   - www.chusho.meti.go.jp
   - chusho.meti.go.jp
@@ -8,9 +7,10 @@ allowed_hosts:
   - jgrants-portal.go.jp
 
 sources:
+  # 中小企業庁は「k番号」の個別公募ページを狙う
   - name: 中小企業庁_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]   # k番号の個別公募を狙い撃ち
+    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]
     exclude: []
     max_new: 60
 
@@ -20,8 +20,11 @@ sources:
     exclude: []
     max_new: 40
 
-  - name: JGrants
+  # jGrants は SPA なので Tavily discovery で候補を見つける
+  - name: JGrants_discovery
     url: https://www.jgrants-portal.go.jp/
-    include: []        # まずは広く。将来、詳細URLパターンが掴めたら絞る
+    discover: tavily
+    query: "site:jgrants-portal.go.jp 公募 申請 補助金 2025"
+    include: []       # discovery結果も doc-only/allowed_hosts で絞り込みます
     exclude: []
     max_new: 40
