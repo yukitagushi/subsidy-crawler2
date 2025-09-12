@@ -1,48 +1,43 @@
 name: Crawl Subsidies
 on:
-  schedule: [ { cron: "5 * * * *" } ]
-  workflow_dispatch: {}
+  schedule: [ { cron: "5 * * * *" } ]     # 毎時05分（UTC）
+  workflow_dispatch: {}                   # 手動実行ボタン
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 20                   # ジョブ全体の上限（必要に応じて増減）
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11", cache: "pip" }
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
       - run: python -m pip install -U pip setuptools wheel
       - run: pip install -r requirements.txt
-
-      # ── ここを追加（Run incremental crawler の直前／同じインデント）──
-      - name: Sanity insert to pages (once)
-        run: |
-          python - <<'PY'
-          import os, psycopg
-          dsn=os.getenv("DATABASE_URL")
-          with psycopg.connect(dsn, autocommit=True) as c:
-              c.execute("""
-                insert into public.pages(url,title,summary,last_fetched)
-                values (%s,%s,%s, now())
-                on conflict (url) do nothing
-              """, ("https://example.com/sentinel-actions",
-                    "（テスト）Actions疎通",
-                    "crawler がこのDBに書けているかの確認"))
-          print("inserted")
-          PY
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      # ───────────────────────────────────────────────────────────────
 
       - name: Run incremental crawler
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          FORCE_REFRESH: "1"          # ← 今回だけON（終わったら削除/0へ）
+
+          # ★ 今回だけ 304 を回避して必ず本文(200)を取得するスイッチ
+          #   => lib/http_client.py が FORCE_REFRESH=1 のとき
+          #      If-None-Match / If-Modified-Since を外してGETします
+          FORCE_REFRESH: "1"
+
+          # ★ HTTP待ち時間（中小は長め）
           CONNECT_TIMEOUT: "15"
           READ_TIMEOUT: "60"
           CHUSHO_READ_TIMEOUT: "90"
-          TIME_BUDGET_SEC: "600"
+
+          # ★ 1回の実行で使う時間/件数の上限
+          TIME_BUDGET_SEC: "600"          # 合計10分
           MAX_PAGES_PER_RUN: "120"
           MAX_PER_DOMAIN: "50"
-          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}   # 任意
+
+          # 任意：フォールバックを使うならSecretsに追加して有効化
+          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+
         run: python crawl_incremental.py
