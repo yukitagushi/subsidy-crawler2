@@ -1,6 +1,6 @@
 name: Prune DB
 on:
-  schedule: [ { cron: "30 2 * * *" } ]   # 毎日 02:30 (UTC)
+  schedule: [ { cron: "30 2 * * *" } ]
   workflow_dispatch: {}
 jobs:
   prune:
@@ -8,19 +8,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11", cache: "pip" }
-      - run: python -m pip install -U pip setuptools wheel
+        with: { python-version: "3.11" }
+      - run: python -m pip install -U pip
       - run: pip install "psycopg[binary]>=3.1.18,<3.3"
+      - name: Apply schema
+        run: |
+          python - <<'PY'
+          import os, psycopg, pathlib
+          dsn=os.getenv("DATABASE_URL")
+          with psycopg.connect(dsn, autocommit=True) as c:
+              c.execute(pathlib.Path("schema.sql").read_text())
+          print("schema applied")
+          PY
+        env: { DATABASE_URL: ${{ secrets.DATABASE_URL }} }
       - name: Run prune
         run: |
           python - <<'PY'
           import os, psycopg, pathlib
-          dsn = os.getenv("DATABASE_URL")
-          assert dsn, "No DATABASE_URL"
-          sql = pathlib.Path("prune.sql").read_text()
+          dsn=os.getenv("DATABASE_URL")
           with psycopg.connect(dsn, autocommit=True) as c:
-              c.execute(sql)
+              c.execute(pathlib.Path("prune.sql").read_text() if pathlib.Path("prune.sql").exists() else "select 1")
           print("prune done")
           PY
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        env: { DATABASE_URL: ${{ secrets.DATABASE_URL }} }

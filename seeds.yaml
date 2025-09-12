@@ -9,16 +9,14 @@ allowed_hosts:
 sources:
   - name: 中小企業庁_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    include: []   # ← まずは広く。落ち着いたら絞り込む
+    include: []   # ← 初回は広く（後で絞る）
     exclude: []
     max_new: 40
-
   - name: 中小企業庁_IT_案内
     url: https://www.chusho.meti.go.jp/shogyo/shogyo/hojyokin/it.html
     include: []
     exclude: []
     max_new: 30
-
   - name: JGrants
     url: https://www.jgrants-portal.go.jp/
     include: []

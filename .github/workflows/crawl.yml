@@ -6,7 +6,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20               # ← ジョブ全体の上限（増やす）
+    timeout-minutes: 20                # ジョブ全体の上限
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,19 +17,19 @@ jobs:
       - name: Run incremental crawler
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # ★ 304回避：このRunだけON（次は0に戻す or 削除）
+          # ★ このRunだけ 304 を回避して本文を必ず取得（終わったら削除/0に）
           FORCE_REFRESH: "1"
 
-          # ★ HTTPの待ち時間を延長
-          CONNECT_TIMEOUT: "15"       # 10→15秒（接続）
-          READ_TIMEOUT: "60"          # 35→60秒（既定）
-          CHUSHO_READ_TIMEOUT: "90"   # 中小企業庁ドメインだけ90秒
+          # ★ HTTPの待ち時間を延長（中小はさらに長め）
+          CONNECT_TIMEOUT: "15"
+          READ_TIMEOUT: "60"
+          CHUSHO_READ_TIMEOUT: "90"
 
-          # ★ 1回の実行で使える時間と件数を増やす
-          TIME_BUDGET_SEC: "600"      # 240→600秒（10分）
-          MAX_PAGES_PER_RUN: "120"    # 60→120
-          MAX_PER_DOMAIN: "50"        # 25→50
+          # ★ 1回で回せる時間と件数を拡大
+          TIME_BUDGET_SEC: "600"
+          MAX_PAGES_PER_RUN: "120"
+          MAX_PER_DOMAIN: "50"
 
-          # （任意）フォールバックを使う場合はSecretsに追加しておく
+          # 任意：フォールバック用（Secretsに入れていれば拾われる）
           # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: python crawl_incremental.py
