@@ -83,3 +83,26 @@ def extract_from_html(url: str, html: str) -> dict:
         "period_from": None,
         "period_to": None,
     }
+    # 既存 import の下に追加
+def extract_from_text(url: str, text: str) -> dict:
+    """HTMLでなく素のテキストから最低限を抽出（Tavily raw_content 用）"""
+    from .util import norm_ws, clip
+    t = norm_ws(text or "")
+    title = "(無題)"
+    # 先頭行を暫定タイトルに
+    m = re.search(r"^(.{8,80})$", t, flags=re.M)
+    if m: title = norm_ws(m.group(1))
+    # 緩い拾い
+    rate = None
+    m = re.search(r"補助率[\s:：]*([0-9０-９]+ ?%?)", t);            rate = norm_ws(m.group(1)) if m else None
+    cap  = None
+    m = re.search(r"上限[\s:：]*([0-9０-９,，]+ ?(?:円|万円|億円)?)", t); cap  = norm_ws(m.group(1)) if m else None
+    fiscal_year = None
+    m = re.search(r"(令和\s*[0-9０-９]+年度|20[0-9]{2}年度)", t);         fiscal_year = norm_ws(m.group(1)) if m else None
+
+    return {
+        "url": url, "title": title, "summary": clip(t[:800], 800),
+        "rate": rate, "cap": cap, "target": None, "cost_items": None,
+        "deadline": None, "fiscal_year": fiscal_year, "call_no": None,
+        "scheme_type": None, "period_from": None, "period_to": None
+    }
