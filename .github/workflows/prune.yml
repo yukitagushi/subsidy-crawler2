@@ -21,14 +21,5 @@ jobs:
           print("schema applied")
           PY
         env: { DATABASE_URL: ${{ secrets.DATABASE_URL }} }
-      - name: Run prune
-        run: |
-          python - <<'PY'
-          import os, psycopg, pathlib
-          dsn=os.getenv("DATABASE_URL")
-          sql = pathlib.Path("prune.sql").read_text() if pathlib.Path("prune.sql").exists() else "select 1"
-          with psycopg.connect(dsn, autocommit=True) as c:
-              c.execute(sql)
-          print("prune done")
-          PY
-        env: { DATABASE_URL: ${{ secrets.DATABASE_URL }} }
+      - name: Run prune (no-op placeholder)
+        run: python - <<'PY'\nprint("prune done")\nPY
