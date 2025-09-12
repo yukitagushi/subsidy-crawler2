@@ -1,6 +1,6 @@
 name: Crawl Subsidies
 on:
-  schedule: [ { cron: "5 * * * *" } ]
+  schedule: [ { cron: "5 * * * *" } ]     # 毎時05分（UTC）
   workflow_dispatch: {}
 
 jobs:
@@ -17,12 +17,20 @@ jobs:
       - name: Run incremental crawler
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-         CONNECT_TIMEOUT: "8"
-         READ_TIMEOUT: "25"
-         CHUSHO_READ_TIMEOUT: "35"
-         TIME_BUDGET_SEC: "180"      # 3分
-         MAX_PAGES_PER_RUN: "60"
-         MAX_PER_DOMAIN: "20"
-         USE_TAVILY_DISCOVERY: "1"   # discovery を使う
-          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+
+          # --- 速攻モード（3分で数を増やす）---
+          CONNECT_TIMEOUT: "8"
+          READ_TIMEOUT: "25"
+          CHUSHO_READ_TIMEOUT: "35"
+          TIME_BUDGET_SEC: "180"         # 3分
+          MAX_PAGES_PER_RUN: "60"
+          MAX_PER_DOMAIN: "20"
+
+          # 並列（6並列 / ホストごと2本）
+          PARALLEL_WORKERS: "6"
+          PER_HOST_LIMIT: "2"
+
+          # SPA対策の候補発見（Tavily）
+          USE_TAVILY_DISCOVERY: "1"
+          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}   # ← ある場合だけ有効化
         run: python crawl_incremental.py
