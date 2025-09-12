@@ -1,4 +1,3 @@
-# crawl_incremental.py
 from __future__ import annotations
 import os, re, time, yaml
 from typing import List, Set
@@ -16,9 +15,9 @@ except Exception:
 TAVILY_KEY = os.getenv("TAVILY_API_KEY")
 tv = TavilyClient(api_key=TAVILY_KEY) if (TAVILY_KEY and TavilyClient) else None
 
-TIME_BUDGET_SEC   = int(os.getenv("TIME_BUDGET_SEC", "240"))
-MAX_PAGES_PER_RUN = int(os.getenv("MAX_PAGES_PER_RUN", "60"))
-MAX_PER_DOMAIN    = int(os.getenv("MAX_PER_DOMAIN", "25"))
+TIME_BUDGET_SEC   = int(os.getenv("TIME_BUDGET_SEC", "480"))
+MAX_PAGES_PER_RUN = int(os.getenv("MAX_PAGES_PER_RUN", "120"))
+MAX_PER_DOMAIN    = int(os.getenv("MAX_PER_DOMAIN", "50"))
 
 DOC_TYPES: Set[str] = {"text/html", "application/xhtml+xml", "application/pdf"}
 ASSET_RE  = re.compile(r'\.(js|mjs|css|png|jpe?g|gif|svg|ico|json|map|woff2?|ttf|eot|mp4|webm)($|\?)', re.I)
@@ -104,9 +103,9 @@ def crawl()->None:
                     html, new_etag, new_lm, ctype, status, took = conditional_fetch(u, petag, plm)
                     upsert_http_meta(c, u, new_etag, new_lm, status)
 
-                    if html is None:                      # 304
+                    if html is None:
                         log_fetch(c, u, "304", took, None); continue
-                    if ctype and ctype.lower() not in DOC_TYPES:  # 非文書
+                    if ctype and ctype.lower() not in DOC_TYPES:
                         log_fetch(c, u, "skip", took, f"ctype={ctype}"); continue
 
                     row = extract_from_html(u, html)
@@ -115,7 +114,7 @@ def crawl()->None:
                     if changed: total_saved += 1
 
                 except Exception as e:
-                    if tv:  # ---- フォールバック：Tavily raw_content ----
+                    if tv:
                         try:
                             raw = None
                             if hasattr(tv, "extract"):
