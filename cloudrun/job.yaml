@@ -1,0 +1,19 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: crawl-subsidy
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          containers:
+          - image: gcr.io/PROJECT_ID/crawl-subsidy:latest
+            env:
+            - name: DATABASE_URL
+              value: "postgresql://...:6543/postgres?sslmode=require"
+            - name: BING_SEARCH_KEY
+              value: "YOUR_BING_KEY"
+            - name: TIME_BUDGET_SEC
+              value: "900"
+          restartPolicy: Never
