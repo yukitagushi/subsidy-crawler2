@@ -2,9 +2,11 @@ name: Crawl Subsidies
 on:
   schedule: [ { cron: "5 * * * *" } ]
   workflow_dispatch: {}
+
 jobs:
   crawl:
     runs-on: ubuntu-latest
+    timeout-minutes: 20               # ← ジョブ全体の上限（増やす）
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,8 +17,19 @@ jobs:
       - name: Run incremental crawler
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          FORCE_REFRESH: "1"          # ← ★ この行を一時追加（1回だけON）
-          CONNECT_TIMEOUT: "10"
-          READ_TIMEOUT: "35"
-          CHUSHO_READ_TIMEOUT: "45"
+          # ★ 304回避：このRunだけON（次は0に戻す or 削除）
+          FORCE_REFRESH: "1"
+
+          # ★ HTTPの待ち時間を延長
+          CONNECT_TIMEOUT: "15"       # 10→15秒（接続）
+          READ_TIMEOUT: "60"          # 35→60秒（既定）
+          CHUSHO_READ_TIMEOUT: "90"   # 中小企業庁ドメインだけ90秒
+
+          # ★ 1回の実行で使える時間と件数を増やす
+          TIME_BUDGET_SEC: "600"      # 240→600秒（10分）
+          MAX_PAGES_PER_RUN: "120"    # 60→120
+          MAX_PER_DOMAIN: "50"        # 25→50
+
+          # （任意）フォールバックを使う場合はSecretsに追加しておく
+          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: python crawl_incremental.py
