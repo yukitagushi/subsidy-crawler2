@@ -1,82 +1,33 @@
 name: Crawl Subsidies
 on:
-  schedule: [ { cron: "5 * * * *" } ]     # 毎時05分（UTC）
-  workflow_dispatch: {}                   # 手動実行ボタン
+  schedule: [ { cron: "5 * * * *" } ]
+  workflow_dispatch: {}
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20                   # ジョブ全体の上限（必要に応じて増減）
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
+        with: { python-version: "3.11", cache: "pip" }
       - run: python -m pip install -U pip setuptools wheel
       - run: pip install -r requirements.txt
-
-      # ───────── ここから追加：指定URLを1件だけ強制取得（今回だけ）─────────
-      - name: Debug fetch one URL (one-shot)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SINGLE_URL: "https://www.jgrants-portal.go.jp/"   # ← あなたの指定URL
-          FORCE_REFRESH: "1"          # 条件付きGETを無効化（304を回避して本文を必ず取る）
-          CONNECT_TIMEOUT: "15"
-          READ_TIMEOUT: "60"
-          CHUSHO_READ_TIMEOUT: "90"
-        run: |
-          python - <<'PY'
-          import os, psycopg
-          from lib.http_client import conditional_fetch
-          from lib.extractors import extract_from_html, extract_from_text
-          from lib.db import upsert_page, upsert_http_meta, log_fetch, conn
-
-          url = os.getenv("SINGLE_URL")
-          assert url, "SINGLE_URL is empty"
-
-          with conn() as c:
-              # 1) 強制取得（304回避）
-              html, new_etag, new_lm, ctype, status, took = conditional_fetch(url, None, None)
-              if html is None:
-                  log_fetch(c, url, "304", took, None)
-                  raise SystemExit("got 304 unexpectedly")
-
-              # 2) ETag/LM 更新
-              upsert_http_meta(c, url, new_etag, new_lm, status)
-
-              # 3) 文書タイプ以外はスキップ
-              if ctype and ctype.lower() not in {"text/html","application/xhtml+xml","application/pdf"}:
-                  log_fetch(c, url, "skip", took, f"ctype={ctype}")
-                  raise SystemExit(f"skip non-doc ctype={ctype}")
-
-              # 4) 抽出→保存
-              row = extract_from_html(url, html)
-              changed = upsert_page(c, row)
-              log_fetch(c, url, "ok" if changed else "skip", took, "debug-one")
-              print("debug fetch saved:", changed, url)
-          PY
-      # ───────── 追加ここまで ─────────────────────────────────────
 
       - name: Run incremental crawler
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-          # ★ 今回だけ 304 を回避して必ず本文(200)を取得するスイッチ
-          FORCE_REFRESH: "1"
+          # 通常運用のHTTPタイムアウト（必要に応じて微調整）
+          CONNECT_TIMEOUT: "12"
+          READ_TIMEOUT: "45"
+          CHUSHO_READ_TIMEOUT: "75"
 
-          # ★ HTTP待ち時間（中小は長め）
-          CONNECT_TIMEOUT: "15"
-          READ_TIMEOUT: "60"
-          CHUSHO_READ_TIMEOUT: "90"
-
-          # ★ 1回の実行で使う時間/件数の上限
-          TIME_BUDGET_SEC: "600"          # 合計10分
+          # 合計時間/件数（運用値）
+          TIME_BUDGET_SEC: "480"
           MAX_PAGES_PER_RUN: "120"
           MAX_PER_DOMAIN: "50"
 
-          # 任意：フォールバック用（Secretsに入れていれば拾われる）
+          # 任意：フォールバックを使うなら Secrets にセット
           # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: python crawl_incremental.py
