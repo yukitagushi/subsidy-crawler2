@@ -1,3 +1,4 @@
+# seeds.yaml（増やす用）
 allowed_hosts:
   - www.chusho.meti.go.jp
   - chusho.meti.go.jp
@@ -9,8 +10,7 @@ allowed_hosts:
 sources:
   - name: 中小企業庁_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    # 例: /koukai/koubo/2025/k250617001.html などの個別公募
-    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]
+    include: ["/koukai/koubo/20\\d{2}/k\\d+\\.html$"]   # k番号の個別公募を狙い撃ち
     exclude: []
     max_new: 60
 
@@ -22,6 +22,6 @@ sources:
 
   - name: JGrants
     url: https://www.jgrants-portal.go.jp/
-    include: []     # まずは広く。将来、詳細ページのパターンが掴めたら絞る
+    include: []        # まずは広く。将来、詳細URLパターンが掴めたら絞る
     exclude: []
     max_new: 40
