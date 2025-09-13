@@ -21,12 +21,15 @@ USE_OPENAI_DR = os.getenv("USE_OPENAI_DR", "1") == "1"
 # ---- ウォッチドッグ ----
 HARD_KILL_SEC = int(os.getenv("HARD_KILL_SEC", "600"))  # 10min
 
+# ---- 先読み件数（ENVで切替）----
+PREFETCH_MAX = int(os.getenv("PREFETCH_MAX", "0"))      # 0=先読み停止
+
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
 def time_left(deadline: float) -> float:
     return max(0.0, deadline - time.time())
 
-def quick_prefetch(urls, max_n: int = 2, deadline: float = float("inf")):
+def quick_prefetch(urls, max_n: int, deadline: float):
     taken = 0
     with conn() as c:
         for u in urls:
@@ -47,10 +50,8 @@ def quick_prefetch(urls, max_n: int = 2, deadline: float = float("inf")):
                 log_fetch(c, u, "ng", 0, f"prefetch error: {e}")
 
 def print_run_summary(run_id: str):
-    """
-    % を一切使わず、POSITION と COALESCE で安全に集計。
-    """
     with conn() as c, c.cursor() as cur:
+        # % を使わず POSITION で non-sentinel を数える
         cur.execute(
             "select count(*) from public.pages "
             "where position('https://example.com/sentinel' in url) = 0",
@@ -108,7 +109,6 @@ def main():
 
         if USE_OPENAI_DR and os.getenv("OPENAI_API_KEY",""):
             if can_spend("openai", OPENAI_Q_PER_RUN):
-                # 複数クエリを順に試す（ENV: DR_QUERIES があれば上書き）
                 default_queries = [
                     "補助金 公募 申請 2025",
                     "site:chusho.meti.go.jp 公募 2025",
@@ -136,14 +136,15 @@ def main():
                 urls = v_discover(query="補助金 公募 申請 2025", page_size=25, max_pages=1)
                 add_usage("vertex", VERTEX_Q_PER_RUN)
                 print("vertex discovery candidates:", len(urls))
-                quick_prefetch(urls, max_n=2, deadline=deadline)
+                if PREFETCH_MAX > 0:
+                    quick_prefetch(urls, max_n=PREFETCH_MAX, deadline=deadline)
             else:
                 print("vertex discovery skipped: monthly budget reached")
 
     except Exception as e:
         print("Discovery error:", e)
 
-    # 4) サマリー（%を使わない）
+    # 4) サマリー（%不使用）
     run_id = os.getenv("RUN_ID","")
     if run_id:
         try: print_run_summary(run_id)
