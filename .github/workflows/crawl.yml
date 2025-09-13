@@ -45,9 +45,9 @@ jobs:
 
           # === 速攻寄り（crawl に 4分回す） ===
           CONNECT_TIMEOUT: "8"
-          READ_TIMEOUT: "30"
-          CHUSHO_READ_TIMEOUT: "45"
-          TIME_BUDGET_SEC: "240"
+          READ_TIMEOUT: "45"
+          CHUSHO_READ_TIMEOUT: "75"
+          TIME_BUDGET_SEC: "360"
           MAX_PAGES_PER_RUN: "60"
           MAX_PER_DOMAIN: "20"
           PARALLEL_WORKERS: "6"
