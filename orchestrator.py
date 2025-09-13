@@ -48,19 +48,15 @@ def quick_prefetch(urls, max_n: int = 2, deadline: float = float("inf")):
 
 def print_run_summary(run_id: str):
     """
-    SQL に % を一切使わず、POSITION と COALESCE で安全に集計する。
+    % を一切使わず、POSITION と COALESCE で安全に集計。
     """
     with conn() as c, c.cursor() as cur:
-        # pages の現在値（テスト行は除外）← LIKE '...%' をやめ、POSITION で置き換え
         cur.execute(
             "select count(*) from public.pages "
             "where position('https://example.com/sentinel' in url) = 0",
-            (),  # 引数なし
-            prepare=False
+            (), prepare=False
         )
         pages_after = cur.fetchone()[0] or 0
-
-        # この RUN の status 別件数（POSITION で部分一致）
         cur.execute(
             """
             select status, count(*)
@@ -71,7 +67,6 @@ def print_run_summary(run_id: str):
             (run_id,), prepare=False
         )
         counts = {k: v for k, v in cur.fetchall()}
-
     print(f"SUMMARY run={run_id}: ok={counts.get('ok',0)}, 304={counts.get('304',0)}, "
           f"skip={counts.get('skip',0)}, ng={counts.get('ng',0)}, "
           f"list={counts.get('list',0)}, pages_non_sentinel={pages_after}")
@@ -79,22 +74,19 @@ def print_run_summary(run_id: str):
 def main():
     start = time.time()
     deadline = start + HARD_KILL_SEC
-
-    # 1) スキーマ適用
     ensure_schema()
 
-    # 2) RSS（軽い）
+    # 1) RSS（軽い）
     if time_left(deadline) < 5:
         print("watchdog: deadline before RSS"); return
     try:
-        # 月次上限（vertex/openai）をセット（初回・月替わりで上書き）
         set_monthly_limit("vertex", VERTEX_Q_MONTH_LIMIT)
         set_monthly_limit("openai", OPENAI_Q_MONTH_LIMIT)
         lane_rss()
     except Exception as e:
         print("RSS lane error:", e)
 
-    # 3) crawl 本体（必ず実行）
+    # 2) crawl 本体（必ず実行）
     if time_left(deadline) < 5:
         print("watchdog: skip crawl (deadline reached before crawl)"); return
     try:
@@ -102,7 +94,7 @@ def main():
     except Exception as e:
         print("Crawl lane error:", e)
 
-    # 4) 残り時間で Discovery
+    # 3) 残り時間で Discovery（OpenAI 優先）
     if time_left(deadline) < 5:
         print("watchdog: deadline before discovery")
         run_id = os.getenv("RUN_ID","")
@@ -116,14 +108,29 @@ def main():
 
         if USE_OPENAI_DR and os.getenv("OPENAI_API_KEY",""):
             if can_spend("openai", OPENAI_Q_PER_RUN):
-                items = dr_discover(query="補助金 公募 申請 2025", max_items=40)
-                add_usage("openai", OPENAI_Q_PER_RUN)
-                print(f"openai dr candidates={len(items)} (saved via upsert_page)")
-                saved_any = bool(items)
+                # 複数クエリを順に試す（ENV: DR_QUERIES があれば上書き）
+                default_queries = [
+                    "補助金 公募 申請 2025",
+                    "site:chusho.meti.go.jp 公募 2025",
+                    "site:jgrants-portal.go.jp 公募 2025",
+                    "site:meti.go.jp 公募 2025",
+                ]
+                qs = os.getenv("DR_QUERIES", "")
+                queries = [q.strip() for q in qs.split("|") if q.strip()] or default_queries
+
+                for q in queries:
+                    if time_left(deadline) < 10:
+                        break
+                    items = dr_discover(query=q, max_items=int(os.getenv("DR_MAX_ITEMS","40")))
+                    if items:
+                        saved_any = True
+                        break
+                add_usage("openai", 1)
+                print(f"openai dr saved_any={saved_any}")
             else:
                 print("openai discovery skipped: monthly budget reached")
 
-        # Deep Research が 0件なら Vertex へフォールバック
+        # 0件なら Vertex へフォールバック
         if not saved_any:
             if can_spend("vertex", VERTEX_Q_PER_RUN):
                 urls = v_discover(query="補助金 公募 申請 2025", page_size=25, max_pages=1)
@@ -136,13 +143,11 @@ def main():
     except Exception as e:
         print("Discovery error:", e)
 
-    # 5) サマリー（% を使わない）
+    # 4) サマリー（%を使わない）
     run_id = os.getenv("RUN_ID","")
     if run_id:
-        try:
-            print_run_summary(run_id)
-        except Exception as e:
-            print("summary error:", e)
+        try: print_run_summary(run_id)
+        except Exception as e: print("summary error:", e)
 
     print("Done in", int(time.time() - start), "sec")
 
