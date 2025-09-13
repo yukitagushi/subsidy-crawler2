@@ -19,18 +19,31 @@ jobs:
 
       - name: Run orchestrator
         env:
+          # === 必須 Secrets ===
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-          # 月次クォータ（無料枠ガード）
+          # === Discovery の選択 ===
+          # OpenAI Deep Research を使う: "1" / Vertex を使う: "0"
+          USE_OPENAI_DR: "1"
+          # Deep Research が探索してよいドメイン（カンマ区切り）
+          DR_ALLOWED_DOMAINS: "www.chusho.meti.go.jp,chusho.meti.go.jp,www.meti.go.jp,meti.go.jp,www.jgrants-portal.go.jp,jgrants-portal.go.jp"
+          # モデル/タイムアウト（お好みで）
+          DR_MODEL: "o4-mini-deep-research-2025-06-26"
+          DR_TIMEOUT_SEC: "40"
+
+          # === 月次の上限（無料枠ガード） ===
           VERTEX_Q_MONTH_LIMIT: "9000"
           VERTEX_Q_PER_RUN: "50"
+          OPENAI_Q_MONTH_LIMIT: "9000"   # ← OpenAI 版の月次上限（まずはVertexと同値でOK）
+          OPENAI_Q_PER_RUN: "1"          # ← 1回のRunで Deep Research API を何回まで叩くか（1推奨）
 
-          # ウォッチドッグ（10分）
+          # === ウォッチドッグ（10分） ===
           HARD_KILL_SEC: "600"
 
-          # 速攻寄り（crawl に 4分回す）
+          # === 速攻寄り（crawl に 4分回す設定） ===
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "30"
           CHUSHO_READ_TIMEOUT: "45"
