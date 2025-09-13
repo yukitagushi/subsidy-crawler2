@@ -19,8 +19,8 @@ sources:
     exclude: []
     max_new: 40
 
-  - name: JGrants_discovery
+  - name: JGrants_top
     url: https://www.jgrants-portal.go.jp/
-    include: []    # discoveryは別レーンで供給
+    include: []
     exclude: []
     max_new: 40
