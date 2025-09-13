@@ -5,16 +5,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      - name: Normalize secrets
+        env:
+          VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
+        run: |
+          # 改行・タブ・空白を削除して正規化（マスクされるので内容は表示しない）
+          CLEAN_SC="$(printf "%s" "$VERTEX_SERVING_CONFIG" | tr -d '\r\n' | tr -d '[:space:]')"
+          echo "SC_LEN=$(printf "%s" "$CLEAN_SC" | wc -c)" >> $GITHUB_ENV
+          echo "SC=$CLEAN_SC" >> $GITHUB_ENV
+
+      - name: Show length only (sanity)
+        run: |
+          echo "SERVING_CONFIG length: $SC_LEN chars"
+
       - name: Curl searchLite
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
         run: |
           set -e
-          echo "SERVING_CONFIG=${VERTEX_SERVING_CONFIG}"
-          curl -sS -X POST \
+          curl -sS -w "\nHTTP:%{http_code}\n" -X POST \
             -H "Content-Type: application/json" \
             -H "x-goog-api-key: ${GOOGLE_API_KEY}" \
-            "https://discoveryengine.googleapis.com/v1/${VERTEX_SERVING_CONFIG}:searchLite" \
-            -d "{\"servingConfig\":\"${VERTEX_SERVING_CONFIG}\",\"query\":\"補助金 公募 2025\",\"pageSize\":5}" \
-            | head -c 400
+            "https://discoveryengine.googleapis.com/v1/${SC}:searchLite" \
+            -d "{\"servingConfig\":\"${SC}\",\"query\":\"補助金 公募 2025\",\"pageSize\":5}"
