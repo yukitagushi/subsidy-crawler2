@@ -1,9 +1,14 @@
 name: Crawl Night (deep)
+
 on:
   schedule:
-    # JST 01:00（= UTC 16:00）に毎日実行
-    - cron: "0 16 * * *"
+    # JST 00:00–05:00 を15分おき（UTC 15–20時）
+    - cron: "0,15,30,45 15-20 * * *"
   workflow_dispatch: {}
+
+concurrency:
+  group: crawl-night
+  cancel-in-progress: true   # 前の実行が残っていたらキャンセルして最新だけ走らせる
 
 jobs:
   crawl:
@@ -27,7 +32,7 @@ jobs:
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-          # === Discovery（必要ならOpenAI優先でOK） ===
+          # === Discovery（必要ならOpenAI優先のままでOK） ===
           USE_OPENAI_DR: "1"
           DR_ALLOWED_DOMAINS: "www.chusho.meti.go.jp,chusho.meti.go.jp,www.meti.go.jp,meti.go.jp,www.jgrants-portal.go.jp,jgrants-portal.go.jp"
           DR_MODEL: "o4-mini-deep-research-2025-06-26"
@@ -41,13 +46,13 @@ jobs:
           OPENAI_Q_MONTH_LIMIT: "9000"
           OPENAI_Q_PER_RUN: "2"
 
-          # === 深掘り設定（crawl に 8 分。先読みは停止） ===
+          # === 深掘り設定（crawl を長め / 先読みなし / backfill 強化） ===
           HARD_KILL_SEC: "600"
-          PREFETCH_MAX: "0"
-          CONNECT_TIMEOUT: "8"
+          PREFETCH_MAX: "0"          # 先読みせず crawl に全振り
           READ_TIMEOUT: "60"
           CHUSHO_READ_TIMEOUT: "90"
-          TIME_BUDGET_SEC: "480"    # ← crawl 8分
+          TIME_BUDGET_SEC: "480"     # crawl 8分
+          BACKFILL_SEED_BATCH: "40"  # ← (無題) から40件/回を重点取得
           MAX_PAGES_PER_RUN: "80"
           MAX_PER_DOMAIN: "30"
           PARALLEL_WORKERS: "6"
