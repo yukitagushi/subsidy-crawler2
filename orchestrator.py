@@ -21,8 +21,8 @@ USE_OPENAI_DR = os.getenv("USE_OPENAI_DR", "1") == "1"
 # ---- ウォッチドッグ ----
 HARD_KILL_SEC = int(os.getenv("HARD_KILL_SEC", "600"))  # 10min
 
-# ---- 先読み件数（ENVで切替）----
-PREFETCH_MAX = int(os.getenv("PREFETCH_MAX", "0"))      # 0=先読み停止
+# ---- 先読み件数（ENVで制御）----
+PREFETCH_MAX = int(os.getenv("PREFETCH_MAX", "0"))      # 0=先読み停止（crawlに全振り）
 
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
@@ -30,6 +30,7 @@ def time_left(deadline: float) -> float:
     return max(0.0, deadline - time.time())
 
 def quick_prefetch(urls, max_n: int, deadline: float):
+    """Discovery候補から少数だけ本文取得して保存（crawl前座）。"""
     taken = 0
     with conn() as c:
         for u in urls:
@@ -49,9 +50,39 @@ def quick_prefetch(urls, max_n: int, deadline: float):
             except Exception as e:
                 log_fetch(c, u, "ng", 0, f"prefetch error: {e}")
 
+def seed_minimal_pages(urls, max_n: int = 100):
+    """
+    GET を行わず、URL だけで pages に最小行を upsert（title='(無題)' など）。
+    まず“貯める”ことが目的のときに使う。後続の crawl がリッチ化する。
+    """
+    def _row(url: str) -> dict:
+        return {
+            "url": url, "title": "(無題)", "summary": None,
+            "rate": None, "cap": None, "target": None, "cost_items": None,
+            "deadline": None, "fiscal_year": None, "call_no": None,
+            "scheme_type": None, "period_from": None, "period_to": None
+        }
+
+    saved = 0
+    uniq, seen = [], set()
+    for u in urls:
+        if u not in seen:
+            seen.add(u); uniq.append(u)
+        if len(uniq) >= max_n: break
+
+    with conn() as c:
+        for u in uniq:
+            try:
+                changed = upsert_page(c, _row(u))
+                log_fetch(c, u, "seed" if changed else "skip", 0, "seed:minimal")
+                if changed: saved += 1
+            except Exception as e:
+                log_fetch(c, u, "ng", 0, f"seed error: {e}")
+    print(f"seeded minimal pages: {saved}/{len(uniq)}")
+
 def print_run_summary(run_id: str):
+    """% を一切使わず、POSITION と COALESCE で安全に集計。"""
     with conn() as c, c.cursor() as cur:
-        # % を使わず POSITION で non-sentinel を数える
         cur.execute(
             "select count(*) from public.pages "
             "where position('https://example.com/sentinel' in url) = 0",
@@ -70,7 +101,8 @@ def print_run_summary(run_id: str):
         counts = {k: v for k, v in cur.fetchall()}
     print(f"SUMMARY run={run_id}: ok={counts.get('ok',0)}, 304={counts.get('304',0)}, "
           f"skip={counts.get('skip',0)}, ng={counts.get('ng',0)}, "
-          f"list={counts.get('list',0)}, pages_non_sentinel={pages_after}")
+          f"list={counts.get('list',0)}, seed={counts.get('seed',0)}, "
+          f"pages_non_sentinel={pages_after}")
 
 def main():
     start = time.time()
@@ -87,7 +119,7 @@ def main():
     except Exception as e:
         print("RSS lane error:", e)
 
-    # 2) crawl 本体（必ず実行）
+    # 2) crawl 本体（必ず実行：本文取得で ok を狙う）
     if time_left(deadline) < 5:
         print("watchdog: skip crawl (deadline reached before crawl)"); return
     try:
@@ -107,6 +139,7 @@ def main():
     try:
         saved_any = False
 
+        # --- OpenAI Deep Research ---
         if USE_OPENAI_DR and os.getenv("OPENAI_API_KEY",""):
             if can_spend("openai", OPENAI_Q_PER_RUN):
                 default_queries = [
@@ -122,22 +155,23 @@ def main():
                     if time_left(deadline) < 10:
                         break
                     items = dr_discover(query=q, max_items=int(os.getenv("DR_MAX_ITEMS","40")))
-                    if items:
-                        saved_any = True
-                        break
+                    if items: saved_any = True; break
                 add_usage("openai", 1)
                 print(f"openai dr saved_any={saved_any}")
             else:
                 print("openai discovery skipped: monthly budget reached")
 
-        # 0件なら Vertex へフォールバック
+        # --- Vertex fallback（候補URLを“シード保存”してDBを増やす） ---
         if not saved_any:
             if can_spend("vertex", VERTEX_Q_PER_RUN):
                 urls = v_discover(query="補助金 公募 申請 2025", page_size=25, max_pages=1)
                 add_usage("vertex", VERTEX_Q_PER_RUN)
                 print("vertex discovery candidates:", len(urls))
+                # 1) 先読みで本文保存（必要なら）
                 if PREFETCH_MAX > 0:
                     quick_prefetch(urls, max_n=PREFETCH_MAX, deadline=deadline)
+                # 2) 先読みだけで終わらせず、最低限でも“シード保存”してDBに貯める
+                seed_minimal_pages(urls, max_n=100)
             else:
                 print("vertex discovery skipped: monthly budget reached")
 
