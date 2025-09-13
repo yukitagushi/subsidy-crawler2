@@ -1,5 +1,3 @@
--- pages / fetch_log / http_cache は既にある想定（省略可）
-
 create table if not exists public.pages(
   url           text primary key,
   title         text not null,
@@ -35,7 +33,7 @@ end $$;
 create table if not exists public.fetch_log(
   id         bigserial primary key,
   url        text,
-  status     text,        -- ok / 304 / skip / ng / list
+  status     text,
   took_ms    integer,
   error      text,
   fetched_at timestamptz default now()
@@ -50,16 +48,14 @@ create table if not exists public.http_cache(
   last_changed_at timestamptz
 );
 
--- 月次クォータ（予約語回避のため quota_limit 列名を採用）
 create table if not exists public.api_quota(
-  month       text not null,   -- '2025-09'
-  api         text not null,   -- 'vertex' / 'bing' など
+  month       text not null,
+  api         text not null,
   used        integer not null default 0,
   quota_limit integer not null,
   primary key (month, api)
 );
 
--- すでに "limit" 列で作成済みだった場合は安全にリネーム
 do $$
 begin
   if exists (
