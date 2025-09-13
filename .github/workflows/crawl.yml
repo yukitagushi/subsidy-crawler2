@@ -25,25 +25,25 @@ jobs:
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-          # === Discovery の選択 ===
-          # OpenAI Deep Research を使う: "1" / Vertex を使う: "0"
-          USE_OPENAI_DR: "1"
-          # Deep Research が探索してよいドメイン（カンマ区切り）
+          # === Discovery の選択と設定 ===
+          USE_OPENAI_DR: "1"   # 1: OpenAI Deep Research / 0: Vertex
           DR_ALLOWED_DOMAINS: "www.chusho.meti.go.jp,chusho.meti.go.jp,www.meti.go.jp,meti.go.jp,www.jgrants-portal.go.jp,jgrants-portal.go.jp"
-          # モデル/タイムアウト（お好みで）
           DR_MODEL: "o4-mini-deep-research-2025-06-26"
           DR_TIMEOUT_SEC: "40"
+          DR_MAX_ITEMS: "40"
+          # 複数クエリ（パイプ区切り／未設定ならデフォルト4パターン）
+          DR_QUERIES: "補助金 公募 申請 2025|site:chusho.meti.go.jp 公募 2025|site:jgrants-portal.go.jp 公募 2025|site:meti.go.jp 公募 2025"
 
           # === 月次の上限（無料枠ガード） ===
           VERTEX_Q_MONTH_LIMIT: "9000"
           VERTEX_Q_PER_RUN: "50"
-          OPENAI_Q_MONTH_LIMIT: "9000"   # ← OpenAI 版の月次上限（まずはVertexと同値でOK）
-          OPENAI_Q_PER_RUN: "1"          # ← 1回のRunで Deep Research API を何回まで叩くか（1推奨）
+          OPENAI_Q_MONTH_LIMIT: "9000"
+          OPENAI_Q_PER_RUN: "1"
 
           # === ウォッチドッグ（10分） ===
           HARD_KILL_SEC: "600"
 
-          # === 速攻寄り（crawl に 4分回す設定） ===
+          # === 速攻寄り（crawl に 4分回す） ===
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "30"
           CHUSHO_READ_TIMEOUT: "45"
