@@ -1,6 +1,6 @@
 import os, datetime, psycopg
 from contextlib import contextmanager
-from lib.db import ensure_schema  # 追加：毎回先にスキーマ適用
+from lib.db import ensure_schema
 
 DSN = os.getenv("DATABASE_URL")
 
@@ -14,7 +14,7 @@ def _month_str(dt=None):
     return dt.strftime("%Y-%m")
 
 def set_monthly_limit(api: str, limit: int):
-    ensure_schema()  # 先に適用（api_quota のリネームもここで入る）
+    ensure_schema()
     with _conn() as c:
         cur = c.cursor()
         cur.execute("""
@@ -22,7 +22,7 @@ def set_monthly_limit(api: str, limit: int):
           values (%s,%s,0,%s)
           on conflict (month, api) do update
             set quota_limit = excluded.quota_limit
-        """, (_month_str(), api, limit))
+        """, (_month_str(), api, limit), prepare=False)
 
 def get_usage(api: str):
     with _conn() as c:
@@ -31,13 +31,13 @@ def get_usage(api: str):
           select used, quota_limit
             from public.api_quota
            where month=%s and api=%s
-        """, (_month_str(), api))
+        """, (_month_str(), api), prepare=False)
         row = cur.fetchone()
         return (row[0], row[1]) if row else (0, 0)
 
 def can_spend(api: str, will_consume: int) -> bool:
     used, limit = get_usage(api)
-    if limit == 0:   # 未初期化は保守的に拒否
+    if limit == 0:
         return False
     return used + will_consume <= limit
 
@@ -49,4 +49,4 @@ def add_usage(api: str, inc: int):
           values (%s,%s,%s,%s)
           on conflict (month, api) do update
             set used = public.api_quota.used + excluded.used
-        """, (_month_str(), api, inc, 0))
+        """, (_month_str(), api, inc, 0), prepare=False)
