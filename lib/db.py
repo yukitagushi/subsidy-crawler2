@@ -36,8 +36,7 @@ def log_fetch(c, url, status, took_ms, err):
     )
 
 def upsert_page(c, row: dict) -> bool:
-    row = dict(row)
-    row["content_hash"] = content_hash(row)
+    row = dict(row); row["content_hash"] = content_hash(row)
     cur = c.cursor()
     cur.execute("select content_hash from public.pages where url=%s", (row["url"],), prepare=False)
     prev = cur.fetchone()
