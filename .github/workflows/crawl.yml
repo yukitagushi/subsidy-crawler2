@@ -32,9 +32,9 @@ jobs:
 
           # 速攻モード（3分）
           CONNECT_TIMEOUT: "8"
-          READ_TIMEOUT: "25"
-          CHUSHO_READ_TIMEOUT: "35"
-          TIME_BUDGET_SEC: "180"
+          READ_TIMEOUT: "30"
+          CHUSHO_READ_TIMEOUT: " 45"
+          TIME_BUDGET_SEC: "240"
           MAX_PAGES_PER_RUN: "60"
           MAX_PER_DOMAIN: "20"
           PARALLEL_WORKERS: "6"
