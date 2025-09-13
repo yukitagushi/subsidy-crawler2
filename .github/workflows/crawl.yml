@@ -26,12 +26,11 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
           # === Discovery の選択と設定 ===
-          USE_OPENAI_DR: "1"   # 1: OpenAI Deep Research / 0: Vertex
+          USE_OPENAI_DR: "1"   # 1: OpenAI / 0: Vertex
           DR_ALLOWED_DOMAINS: "www.chusho.meti.go.jp,chusho.meti.go.jp,www.meti.go.jp,meti.go.jp,www.jgrants-portal.go.jp,jgrants-portal.go.jp"
           DR_MODEL: "o4-mini-deep-research-2025-06-26"
           DR_TIMEOUT_SEC: "40"
           DR_MAX_ITEMS: "40"
-          # 複数クエリ（パイプ区切り／未設定ならデフォルト4パターン）
           DR_QUERIES: "補助金 公募 申請 2025|site:chusho.meti.go.jp 公募 2025|site:jgrants-portal.go.jp 公募 2025|site:meti.go.jp 公募 2025"
 
           # === 月次の上限（無料枠ガード） ===
@@ -43,11 +42,12 @@ jobs:
           # === ウォッチドッグ（10分） ===
           HARD_KILL_SEC: "600"
 
-          # === 速攻寄り（crawl に 4分回す） ===
+          # === 取り込みに全振り（prefetch 0 / crawl に 6 分） ===
+          PREFETCH_MAX: "0"          # ← 先読みを止める
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "45"
           CHUSHO_READ_TIMEOUT: "75"
-          TIME_BUDGET_SEC: "360"
+          TIME_BUDGET_SEC: "360"     # ← crawl 6分
           MAX_PAGES_PER_RUN: "60"
           MAX_PER_DOMAIN: "20"
           PARALLEL_WORKERS: "6"
