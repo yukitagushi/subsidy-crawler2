@@ -1,9 +1,20 @@
-# lanes/lane_search_vertex.py
-import os, requests
+import os, requests, re
 from lib.db import conn, log_fetch
 
-API_KEY = os.getenv("GOOGLE_API_KEY")                 # Secrets
-SERVING_CONFIG = os.getenv("VERTEX_SERVING_CONFIG")   # projects/.../servingConfigs/default_search
+# --- Secrets を防御的に正規化（改行/空白を除去） ---
+def _clean(s: str | None) -> str:
+    if not s:
+        return ""
+    return "".join(str(s).split())  # 改行・タブ・全角空白も含めて削除
+
+API_KEY = _clean(os.getenv("GOOGLE_API_KEY"))
+SERVING_CONFIG = _clean(os.getenv("VERTEX_SERVING_CONFIG"))  # projects/.../servingConfigs/default_search
+
+# 形式チェック（誤っていたらログだけ残して終了）
+_SC_PAT = re.compile(
+    r"^projects\/[^\/]+\/locations\/(global|us|eu)\/collections\/default_collection\/"
+    r"(engines|dataStores)\/[^\/]+\/servingConfigs\/(default_search|default_serving_config)$"
+)
 
 def discover(query="公募 補助金 申請 2025", page_size=25, max_pages=2) -> list[str]:
     """
@@ -11,6 +22,13 @@ def discover(query="公募 補助金 申請 2025", page_size=25, max_pages=2) ->
     """
     if not API_KEY or not SERVING_CONFIG:
         return []
+
+    if not _SC_PAT.match(SERVING_CONFIG):
+        try:
+            with conn() as c:
+                log_fetch(c, "vertex:discovery", "ng", 0, f"malformed servingConfig: {SERVING_CONFIG}")
+        finally:
+            return []
 
     urls: list[str] = []
     page_token = None
