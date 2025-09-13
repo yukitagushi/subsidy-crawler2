@@ -1,12 +1,13 @@
 name: Crawl Subsidies
 on:
-  schedule: [ { cron: "5 * * * *" } ]
   workflow_dispatch: {}
+  schedule: [ { cron: "5 * * * *" } ]
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12            # ← ジョブ全体の上限（12分で強制終了）
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,13 +18,17 @@ jobs:
       - name: Run orchestrator
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+          # Vertex discovery
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
-          RUN_ID: ${{ github.run_id }}
 
-          # 無料枠ガード（例：月9000、1Run=50）
+          # 無料枠ガード（例：月9000 / 1run=50）
           VERTEX_Q_MONTH_LIMIT: "9000"
           VERTEX_Q_PER_RUN: "50"
+
+          # ★ ウォッチドッグ：10分を越えたら必ず main() を抜ける
+          HARD_KILL_SEC: "600"
 
           # 速攻モード（3分で増やす）
           CONNECT_TIMEOUT: "8"
@@ -34,28 +39,6 @@ jobs:
           MAX_PER_DOMAIN: "20"
           PARALLEL_WORKERS: "6"
           PER_HOST_LIMIT: "2"
-        run: python orchestrator.py
 
-      - name: Summarize last run
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           RUN_ID: ${{ github.run_id }}
-        run: |
-          python - <<'PY'
-          import os, psycopg, textwrap
-          dsn=os.getenv("DATABASE_URL"); run=os.getenv("RUN_ID")
-          with psycopg.connect(dsn, autocommit=True) as c, c.cursor() as cur:
-              cur.execute("""
-                select status, count(*) from public.fetch_log
-                 where error like %s group by status order by status
-              """, (f"run={run};%",))
-              rows=cur.fetchall()
-              cur.execute("""
-                select sum((regexp_match(error,'candidates=([0-9]+)'))[1]::int)
-                  from public.fetch_log where status='list' and error like %s
-              """, (f"run={run};%",))
-              cand = cur.fetchone()[0] or 0
-          md=textwrap.dedent(f"## Crawl Summary (run {run})\n- Candidates discovered: **{cand}**\n- Status counts:\n")
-          for s,n in rows: md += f"  - {s}: **{n}**\n"
-          open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8').write(md)
-          PY
+        run: python orchestrator.py
