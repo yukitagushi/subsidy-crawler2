@@ -12,7 +12,8 @@ def conn():
 
 def ensure_schema():
     sql = Path("schema.sql").read_text(encoding="utf-8")
-    with conn() as c: c.execute(sql)
+    with conn() as c:
+        c.execute(sql, prepare=False)
 
 def upsert_http_meta(c, url, etag, last_mod, status):
     cur = c.cursor()
@@ -25,16 +26,20 @@ def upsert_http_meta(c, url, etag, last_mod, status):
       on conflict(url) do update set
         etag=excluded.etag, last_modified=excluded.last_modified,
         last_status=excluded.last_status, last_checked_at=now();
-    """, (url, etag, last_mod, status, etag or "", url, last_mod or "", url, url))
+    """, (url, etag, last_mod, status, etag or "", url, last_mod or "", url, url), prepare=False)
 
 def log_fetch(c, url, status, took_ms, err):
-    c.execute("insert into public.fetch_log(url,status,took_ms,error) values(%s,%s,%s,%s)",
-              (url, status, took_ms, err))
+    c.execute(
+        "insert into public.fetch_log(url,status,took_ms,error) values(%s,%s,%s,%s)",
+        (url, status, took_ms, err),
+        prepare=False,
+    )
 
 def upsert_page(c, row: dict) -> bool:
-    row = dict(row); row["content_hash"] = content_hash(row)
+    row = dict(row)
+    row["content_hash"] = content_hash(row)
     cur = c.cursor()
-    cur.execute("select content_hash from public.pages where url=%s", (row["url"],))
+    cur.execute("select content_hash from public.pages where url=%s", (row["url"],), prepare=False)
     prev = cur.fetchone()
     if prev and prev[0] == row["content_hash"]:
         return False
@@ -51,5 +56,5 @@ def upsert_page(c, row: dict) -> bool:
         call_no=excluded.call_no, scheme_type=excluded.scheme_type,
         period_from=excluded.period_from, period_to=excluded.period_to,
         content_hash=excluded.content_hash, last_fetched=now()
-    """, vals)
+    """, vals, prepare=False)
     return True
