@@ -3,19 +3,26 @@ import re
 from bs4 import BeautifulSoup
 from .util import norm_ws, clip
 
-def _meta(soup: BeautifulSoup, *pairs: tuple[str,str]) -> str:
-    for k,v in pairs:
-        m = soup.find("meta", attrs={k:v})
-        if m and m.get("content"): return norm_ws(m["content"])
+def _meta(soup: BeautifulSoup, *pairs: tuple[str, str]) -> str:
+    for k, v in pairs:
+        m = soup.find("meta", attrs={k: v})
+        if m and m.get("content"):
+            return norm_ws(m["content"])
     return ""
 
 def extract_from_html(url: str, html: str) -> dict:
+    """
+    通常のHTMLから要点を抽出して pages テーブルの行に整形して返す。
+    """
     soup = BeautifulSoup(html, "html.parser")
+
     title = norm_ws(soup.title.text if soup.title else "") \
-        or _meta(soup, ("property","og:title"), ("name","twitter:title"))
-    desc  = _meta(soup, ("name","description"), ("property","og:description"))
+        or _meta(soup, ("property", "og:title"), ("name", "twitter:title"))
+    desc = _meta(soup, ("name", "description"), ("property", "og:description"))
     summary = desc or (norm_ws(soup.find("p").get_text(" ")) if soup.find("p") else "")
-    if not title: title = (summary[:40] or "(無題)")
+    if not title:
+        title = (summary[:40] or "(無題)")
+
     text = soup.get_text(" ")
 
     def f(pat: str) -> str | None:
@@ -28,16 +35,60 @@ def extract_from_html(url: str, html: str) -> dict:
     cap         = f(r"上限[\s:：]*([0-9０-９,，]+ ?(?:円|万円|億円)?)")
 
     target, cost_items = None, None
-    for lab in ("対象経費","対象者","対象"):
+    for lab in ("対象経費", "対象者", "対象"):
         m = re.search(lab + r"[\s:：]*(.+?)\n", text)
         if m:
             val = norm_ws(m.group(1))
-            if "経費" in lab: cost_items = val
-            else:             target     = val
+            if "経費" in lab:
+                cost_items = val
+            else:
+                target = val
 
     return {
-        "url": url, "title": title or "(無題)", "summary": clip(summary, 800),
-        "rate": rate, "cap": cap, "target": target, "cost_items": cost_items,
-        "deadline": None, "fiscal_year": fiscal_year, "call_no": call_no,
-        "scheme_type": None, "period_from": None, "period_to": None,
+        "url": url,
+        "title": title or "(無題)",
+        "summary": clip(summary, 800),
+        "rate": rate,
+        "cap": cap,
+        "target": target,
+        "cost_items": cost_items,
+        "deadline": None,
+        "fiscal_year": fiscal_year,
+        "call_no": call_no,
+        "scheme_type": None,
+        "period_from": None,
+        "period_to": None,
+    }
+
+def extract_from_text(url: str, text: str) -> dict:
+    """
+    HTMLが取れない／テキストだけのフォールバック（Tavily raw など）で
+    最低限の情報を埋めて返す。
+    """
+    t = norm_ws(text or "")
+    # 1行目あたりからタイトル候補を拾う
+    title = "(無題)"
+    m = re.search(r"^(.{8,80})$", t, flags=re.M)
+    if m:
+        title = norm_ws(m.group(1))
+
+    # 数値系をできるだけ拾う
+    rate=None; m=re.search(r"補助率[\s:：]*([0-9０-９]+ ?%?)", t);              rate=norm_ws(m.group(1)) if m else None
+    cap =None; m=re.search(r"上限[\s:：]*([0-9０-９,，]+ ?(?:円|万円|億円)?)", t);  cap =norm_ws(m.group(1)) if m else None
+    fy  =None; m=re.search(r"(令和\s*[0-9０-９]+年度|20[0-9]{2}年度)", t);       fy  =norm_ws(m.group(1)) if m else None
+
+    return {
+        "url": url,
+        "title": title,
+        "summary": clip(t[:800], 800),
+        "rate": rate,
+        "cap": cap,
+        "target": None,
+        "cost_items": None,
+        "deadline": None,
+        "fiscal_year": fy,
+        "call_no": None,
+        "scheme_type": None,
+        "period_from": None,
+        "period_to": None,
     }
