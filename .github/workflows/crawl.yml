@@ -23,17 +23,17 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
 
-          # 無料枠ガード
+          # 月次クォータ（無料枠ガード）
           VERTEX_Q_MONTH_LIMIT: "9000"
           VERTEX_Q_PER_RUN: "50"
 
           # ウォッチドッグ（10分）
           HARD_KILL_SEC: "600"
 
-          # 速攻モード（3分）
+          # 速攻モード（crawlに4分回す設定が必要なら適宜調整）
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "30"
-          CHUSHO_READ_TIMEOUT: " 45"
+          CHUSHO_READ_TIMEOUT: "45"
           TIME_BUDGET_SEC: "240"
           MAX_PAGES_PER_RUN: "60"
           MAX_PER_DOMAIN: "20"
@@ -43,7 +43,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: python orchestrator.py
 
-      # 直近の RUN の “ok 件数” と “pages増分” を Summary に出す
+      # 直近RUNの "ok 件数" と "pages の現在値" を安全にサマリ出力
       - name: Summarize last run (ok & pages delta)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -51,25 +51,29 @@ jobs:
         run: |
           python - <<'PY'
           import os, psycopg, textwrap
-          dsn=os.getenv("DATABASE_URL"); run=os.getenv("RUN_ID")
+          dsn=os.environ["DATABASE_URL"]
+          run=os.environ["RUN_ID"]
+          pattern=f"run={run};%"   # ← ワイルドカードはPython側で作る
+
           with psycopg.connect(dsn, autocommit=True) as c, c.cursor() as cur:
-              # 直前の pages 件数（sentinel除外）
+              # pages の現在値（テスト行は除外）
               cur.execute("select count(*) from public.pages where url not like 'https://example.com/sentinel%'", ())
               pages_after = cur.fetchone()[0] or 0
 
-              # このRUNの ok 件数 / list候補数
+              # このRUNのステータス別件数
               cur.execute("""
                 select status, count(*) from public.fetch_log
                  where error like %s
                  group by status
-              """, (f"run={run};%",))
+              """, (pattern,), prepare=False)
               counts = {k:v for k,v in cur.fetchall()}
 
+              # このRUNで見つけた候補総数（listログの candidates=XX を合算）
               cur.execute("""
-                select sum( (regexp_match(error,'candidates=([0-9]+)'))[1]::int )
+                select coalesce(sum((regexp_match(error,'candidates=([0-9]+)'))[1]::int),0)
                   from public.fetch_log
                  where status='list' and error like %s
-              """, (f"run={run};%",))
+              """, (pattern,), prepare=False)
               cand = cur.fetchone()[0] or 0
 
           md = textwrap.dedent(f"""
