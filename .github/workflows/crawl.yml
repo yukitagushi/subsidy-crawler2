@@ -43,54 +43,64 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: python orchestrator.py
 
-      # 直近RUNの "ok 件数" と "pages の現在値" を安全にサマリ出力（% を完全排除）
-      - name: Summarize last run (ok & pages)
+      - name: Summarize last run (ok & pages)   # ← 完全に置き換え
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           RUN_ID: ${{ github.run_id }}
         run: |
           python - <<'PY'
-          import os, psycopg, textwrap
+          import os, io, csv, psycopg, textwrap
           dsn = os.environ["DATABASE_URL"]
-          run = os.environ["RUN_ID"]              # 数字（文字列）
+          run = os.environ["RUN_ID"]
+          token = f"run={run};"
+
+          ok = ng = skip = s304 = lst = 0
+          pages_after = 0
+          cand_sum = 0
 
           with psycopg.connect(dsn, autocommit=True) as c, c.cursor() as cur:
-              # pages の現在値（テスト行は除外）
+              # pages の現在値（テスト行は除外）…これは固定SQLなので安全
               cur.execute(
                 "select count(*) from public.pages "
-                "where url not like 'https://example.com/sentinel%'", (),
-                prepare=False
+                "where url not like 'https://example.com/sentinel%'", (), prepare=False
               )
               pages_after = cur.fetchone()[0] or 0
 
-              # このRUNの status 別件数（POSITION で絞り込み。%は使わない）
-              cur.execute(
-                """
-                select status, count(*)
-                  from public.fetch_log
-                 where position('run='||%s||';' in error) > 0
-                 group by status
-                """,
-                (run,), prepare=False
+              # fetch_log を CSV で一括取得（SQL内に % を含めない）
+              buf = io.StringIO()
+              cur.copy(
+                "copy (select status, coalesce(error,'') as error from public.fetch_log "
+                "where fetched_at > now() - interval '3 hours') to stdout with csv",
+                buf
               )
-              counts = {k: v for k, v in cur.fetchall()}
-
-              # このRUNで見つけた候補総数（listログの candidates=XX を合算）
-              cur.execute(
-                """
-                select coalesce(sum((regexp_match(error,'candidates=([0-9]+)'))[1]::int),0)
-                  from public.fetch_log
-                 where status='list'
-                   and position('run='||%s||';' in error) > 0
-                """,
-                (run,), prepare=False
-              )
-              cand = cur.fetchone()[0] or 0
+              buf.seek(0)
+              reader = csv.reader(buf)
+              for status, error in reader:
+                  if token not in error:
+                      continue
+                  if status == 'ok': ok += 1
+                  elif status == 'ng': ng += 1
+                  elif status == 'skip': skip += 1
+                  elif status == '304': s304 += 1
+                  elif status == 'list':
+                      lst += 1
+                      # candidates=NN を抽出
+                      i = error.find("candidates=")
+                      if i >= 0:
+                          j = i + len("candidates=")
+                          k = j
+                          while k < len(error) and error[k].isdigit():
+                              k += 1
+                          try:
+                              cand_sum += int(error[j:k])
+                          except Exception:
+                              pass
 
           md = textwrap.dedent(f"""
           ## Crawl Summary (run {run})
-          - Candidates discovered: **{cand}**
-          - ok: **{counts.get('ok',0)}** / 304: {counts.get('304',0)} / skip: {counts.get('skip',0)} / ng: {counts.get('ng',0)} / list: {counts.get('list',0)}
+          - Candidates discovered: **{cand_sum}**
+          - ok: **{ok}** / 304: {s304} / skip: {skip} / ng: {ng} / list: {lst}
           - pages (non-sentinel) after run: **{pages_after}**
           """)
           open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8').write(md)
