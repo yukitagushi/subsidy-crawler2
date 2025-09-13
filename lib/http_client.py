@@ -33,3 +33,4 @@ def conditional_fetch(u, etag, last_mod):
     if r.status_code==304: return None, etag, last_mod, ctype, r.status_code, took
     r.raise_for_status()
     return r.text, r.headers.get("ETag") or etag, r.headers.get("Last-Modified") or last_mod, ctype, r.status_code, took
+  
