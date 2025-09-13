@@ -1,0 +1,57 @@
+name: Crawl Night (deep)
+on:
+  schedule:
+    # JST 01:00（= UTC 16:00）に毎日実行
+    - cron: "0 16 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: "pip" }
+
+      - run: python -m pip install -U pip setuptools wheel
+      - run: pip install -r requirements.txt
+
+      - name: Run orchestrator (night deep)
+        env:
+          # === Secrets ===
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+          # === Discovery（必要ならOpenAI優先でOK） ===
+          USE_OPENAI_DR: "1"
+          DR_ALLOWED_DOMAINS: "www.chusho.meti.go.jp,chusho.meti.go.jp,www.meti.go.jp,meti.go.jp,www.jgrants-portal.go.jp,jgrants-portal.go.jp"
+          DR_MODEL: "o4-mini-deep-research-2025-06-26"
+          DR_TIMEOUT_SEC: "60"
+          DR_MAX_ITEMS: "80"
+          DR_QUERIES: "補助金 公募 申請 2025|site:chusho.meti.go.jp 公募 2025|site:jgrants-portal.go.jp 公募 2025|site:meti.go.jp 公募 2025"
+
+          # === 月次の上限（無料枠ガード） ===
+          VERTEX_Q_MONTH_LIMIT: "9000"
+          VERTEX_Q_PER_RUN: "50"
+          OPENAI_Q_MONTH_LIMIT: "9000"
+          OPENAI_Q_PER_RUN: "2"
+
+          # === 深掘り設定（crawl に 8 分。先読みは停止） ===
+          HARD_KILL_SEC: "600"
+          PREFETCH_MAX: "0"
+          CONNECT_TIMEOUT: "8"
+          READ_TIMEOUT: "60"
+          CHUSHO_READ_TIMEOUT: "90"
+          TIME_BUDGET_SEC: "480"    # ← crawl 8分
+          MAX_PAGES_PER_RUN: "80"
+          MAX_PER_DOMAIN: "30"
+          PARALLEL_WORKERS: "6"
+          PER_HOST_LIMIT: "2"
+
+          RUN_ID: ${{ github.run_id }}
+        run: python orchestrator.py
