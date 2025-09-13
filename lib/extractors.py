@@ -41,17 +41,3 @@ def extract_from_html(url: str, html: str) -> dict:
         "deadline": None, "fiscal_year": fiscal_year, "call_no": call_no,
         "scheme_type": None, "period_from": None, "period_to": None,
     }
-
-def extract_from_text(url: str, text: str) -> dict:
-    t = norm_ws(text or "")
-    title = "(無題)"; m = re.search(r"^(.{8,80})$", t, flags=re.M)
-    if m: title = norm_ws(m.group(1))
-    rate=None; m=re.search(r"補助率[\s:：]*([0-9０-９]+ ?%?)", t);            rate=norm_ws(m.group(1)) if m else None
-    cap =None; m=re.search(r"上限[\s:：]*([0-9０-９,，]+ ?(?:円|万円|億円)?)", t); cap =norm_ws(m.group(1)) if m else None
-    fy  =None; m=re.search(r"(令和\s*[0-9０-９]+年度|20[0-9]{2}年度)", t);     fy  =norm_ws(m.group(1)) if m else None
-    return {
-        "url": url, "title": title, "summary": clip(t[:800], 800),
-        "rate": rate, "cap": cap, "target": None, "cost_items": None,
-        "deadline": None, "fiscal_year": fy, "call_no": None,
-        "scheme_type": None, "period_from": None, "period_to": None,
-    }
