@@ -25,7 +25,7 @@ def time_left(deadline: float) -> float:
 def quick_prefetch(urls, max_n: int = 2, deadline: float = float("inf")):
     """
     Discovery の候補を “少数だけ” 先に軽量取得して保存。
-    3分ランでも確実に pages が増えるようにする“前座”。
+    crawl 後の短い残り時間でも pages を確実に少し増やすための前座。
     """
     taken = 0
     with conn() as c:
@@ -62,7 +62,7 @@ def main():
     except Exception as e:
         print("RSS lane error:", e)
 
-    # 3) ★ crawl 本体を先に回す（必ず少しでも取り込む）
+    # 3) ★ crawl 本体を先に回す（必ず取り込む）
     if time_left(deadline) < 5:
         print("watchdog: skip crawl (deadline reached before crawl)"); return
     try:
