@@ -9,7 +9,7 @@ allowed_hosts:
 sources:
   - name: 中小_公募一覧
     url: https://www.chusho.meti.go.jp/koukai/koubo/
-    include: []     # まずは広く。数が増えたら /koukai/koubo/20\d{2}/k\d+\.html に絞る
+    include: []
     exclude: []
     max_new: 60
 
@@ -21,8 +21,6 @@ sources:
 
   - name: JGrants_discovery
     url: https://www.jgrants-portal.go.jp/
-    discover: tavily
-    query: "site:jgrants-portal.go.jp 公募 募集 申請 補助金 2025"
-    include: []
+    include: []    # discoveryは別レーンで供給
     exclude: []
     max_new: 40
