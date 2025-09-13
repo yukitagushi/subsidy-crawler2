@@ -36,7 +36,8 @@ def upsert_page(c, row: dict) -> bool:
     cur = c.cursor()
     cur.execute("select content_hash from public.pages where url=%s", (row["url"],))
     prev = cur.fetchone()
-    if prev and prev[0] == row["content_hash"]: return False
+    if prev and prev[0] == row["content_hash"]:
+        return False
     cols = ["url","title","summary","rate","cap","target","cost_items","deadline",
             "fiscal_year","call_no","scheme_type","period_from","period_to","content_hash"]
     vals = [row.get(k) for k in cols]
