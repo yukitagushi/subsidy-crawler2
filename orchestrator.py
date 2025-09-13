@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlparse
 
 from lib.db import ensure_schema, conn, upsert_http_meta, upsert_page, log_fetch
 from lib.budget import set_monthly_limit, can_spend, add_usage
@@ -30,8 +31,15 @@ BACKFILL_SEED_BATCH = int(os.getenv("BACKFILL_SEED_BATCH", "0"))  # 0=off
 
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
+RUN_ID = os.getenv("RUN_ID", "")
+
 def time_left(deadline: float) -> float:
     return max(0.0, deadline - time.time())
+
+def log_run(c, url: str, status: str, took_ms: int, msg: str | None):
+    """fetch_log の error に run=...; を必ず入れる"""
+    prefix = f"run={RUN_ID}; " if RUN_ID else ""
+    log_fetch(c, url, status, took_ms, prefix + (msg or ""))
 
 def quick_prefetch(urls, max_n: int, deadline: float):
     taken = 0
@@ -43,17 +51,56 @@ def quick_prefetch(urls, max_n: int, deadline: float):
                 html, etag, lm, ctype, status, took = conditional_fetch(u, None, None)
                 upsert_http_meta(c, u, etag, lm, status)
                 if html is None:
-                    log_fetch(c, u, "304", took, "prefetch"); continue
+                    log_run(c, u, "304", took, "prefetch"); continue
                 if ctype and ctype.lower() not in DOC_TYPES:
-                    log_fetch(c, u, "skip", took, f"prefetch ctype={ctype}"); continue
+                    log_run(c, u, "skip", took, f"prefetch ctype={ctype}"); continue
                 changed = upsert_page(c, extract_from_html(u, html))
-                log_fetch(c, u, "ok" if changed else "skip", took, "prefetch")
+                log_run(c, u, "ok" if changed else "skip", took, "prefetch")
                 if changed: taken += 1
             except Exception as e:
-                log_fetch(c, u, "ng", 0, f"prefetch error: {e}")
+                log_run(c, u, "ng", 0, f"prefetch error: {e}")
+
+def _row_minimal(url: str) -> dict:
+    return {
+        "url": url, "title": "(無題)", "summary": None,
+        "rate": None, "cap": None, "target": None, "cost_items": None,
+        "deadline": None, "fiscal_year": None, "call_no": None,
+        "scheme_type": None, "period_from": None, "period_to": None
+    }
+
+def _row_from_pdf(url: str) -> dict:
+    """PDF用の簡易更新：ファイル名をタイトルに反映"""
+    title = os.path.basename(urlparse(url).path) or "(PDF)"
+    title = title.replace(".pdf", "").replace(".PDF", "")
+    return {
+        "url": url,
+        "title": f"{title} (PDF)",
+        "summary": "PDF（本文未解析）",
+        "rate": None, "cap": None, "target": None, "cost_items": None,
+        "deadline": None, "fiscal_year": None, "call_no": None,
+        "scheme_type": None, "period_from": None, "period_to": None
+    }
+
+def seed_minimal_pages(urls, max_n: int = 100):
+    uniq, seen = [], set()
+    for u in urls:
+        if u not in seen:
+            seen.add(u); uniq.append(u)
+        if len(uniq) >= max_n: break
+
+    saved = 0
+    with conn() as c:
+        for u in uniq:
+            try:
+                changed = upsert_page(c, _row_minimal(u))
+                log_run(c, u, "seed" if changed else "skip", 0, "seed:minimal")
+                if changed: saved += 1
+            except Exception as e:
+                log_run(c, u, "ng", 0, f"seed error: {e}")
+    print(f"seeded minimal pages: {saved}/{len(uniq)}")
 
 def backfill_untitled(batch: int, deadline: float):
-    """title='(無題)' または summary 空の URL を古い順に batch 件だけ本文取得して更新。"""
+    """title='(無題)' または summary 空の URL を古い順に batch 件だけ本文取得して更新（PDFにも対応）"""
     if batch <= 0 or time_left(deadline) < 5:
         return
 
@@ -68,15 +115,14 @@ def backfill_untitled(batch: int, deadline: float):
             order by last_fetched asc nulls first
             limit %s
             """,
-            (batch,),
-            prepare=False
+            (batch,), prepare=False
         )
         urls = [r[0] for r in cur.fetchall()]
 
     if not urls:
         return
 
-    taken = 0
+    updated = 0
     with conn() as c:
         for u in urls:
             if time_left(deadline) < 5:
@@ -84,43 +130,29 @@ def backfill_untitled(batch: int, deadline: float):
             try:
                 html, etag, lm, ctype, status, took = conditional_fetch(u, None, None)
                 upsert_http_meta(c, u, etag, lm, status)
+
+                ct = (ctype or "").lower()
                 if html is None:
-                    log_fetch(c, u, "304", took, "backfill"); continue
-                if ctype and ctype.lower() not in DOC_TYPES:
-                    log_fetch(c, u, "skip", took, f"backfill ctype={ctype}"); continue
-                changed = upsert_page(c, extract_from_html(u, html))
-                log_fetch(c, u, "ok" if changed else "skip", took, "backfill")
-                if changed: taken += 1
+                    log_run(c, u, "304", took, "backfill"); continue
+
+                if ct in ("text/html", "application/xhtml+xml"):
+                    changed = upsert_page(c, extract_from_html(u, html))
+                    log_run(c, u, "ok" if changed else "skip", took, "backfill html")
+                    if changed: updated += 1
+
+                elif ct == "application/pdf":
+                    # PDF は最小でもタイトル更新して “(無題)” を脱出させる
+                    changed = upsert_page(c, _row_from_pdf(u))
+                    log_run(c, u, "ok" if changed else "skip", took, "backfill pdf")
+                    if changed: updated += 1
+
+                else:
+                    log_run(c, u, "skip", took, f"backfill ctype={ct}")
+
             except Exception as e:
-                log_fetch(c, u, "ng", 0, f"backfill error: {e}")
-    print(f"backfill updated: {taken}/{len(urls)}")
+                log_run(c, u, "ng", 0, f"backfill error: {e}")
 
-def seed_minimal_pages(urls, max_n: int = 100):
-    """URL だけで pages に最小行を upsert（まず貯める運用）。"""
-    def _row(url: str) -> dict:
-        return {
-            "url": url, "title": "(無題)", "summary": None,
-            "rate": None, "cap": None, "target": None, "cost_items": None,
-            "deadline": None, "fiscal_year": None, "call_no": None,
-            "scheme_type": None, "period_from": None, "period_to": None
-        }
-
-    uniq, seen = [], set()
-    for u in urls:
-        if u not in seen:
-            seen.add(u); uniq.append(u)
-        if len(uniq) >= max_n: break
-
-    saved = 0
-    with conn() as c:
-        for u in uniq:
-            try:
-                changed = upsert_page(c, _row(u))
-                log_fetch(c, u, "seed" if changed else "skip", 0, "seed:minimal")
-                if changed: saved += 1
-            except Exception as e:
-                log_fetch(c, u, "ng", 0, f"seed error: {e}")
-    print(f"seeded minimal pages: {saved}/{len(uniq)}")
+    print(f"backfill updated: {updated}/{len(urls)}")
 
 def print_run_summary(run_id: str):
     """% を一切使わず、POSITION と COALESCE で安全に集計。"""
@@ -160,8 +192,8 @@ def main():
     except Exception as e:
         print("RSS lane error:", e)
 
-    # 2) crawl 本体（本文取得で ok を狙う）
-    if time_left(deadline) < 5: print("watchdog: skip crawl (deadline before crawl)"); return
+    # 2) crawl 本体
+    if time_left(deadline) < 5: print("watchdog: skip crawl (deadline reached before crawl)"); return
     try:
         lane_crawl()
     except Exception as e:
@@ -171,7 +203,7 @@ def main():
     if BACKFILL_SEED_BATCH > 0 and time_left(deadline) >= 5:
         backfill_untitled(BACKFILL_SEED_BATCH, deadline)
 
-    # 4) 残り時間で Discovery（OpenAI 優先、ダメなら Vertex seed）
+    # 4) 残り時間で Discovery（OpenAI 優先→Vertex seed）
     if time_left(deadline) >= 5:
         try:
             saved_any = False
@@ -202,7 +234,6 @@ def main():
                     print("vertex discovery candidates:", len(urls))
                     if PREFETCH_MAX > 0:
                         quick_prefetch(urls, max_n=PREFETCH_MAX, deadline=deadline)
-                    # seed でもDBに貯める
                     seed_minimal_pages(urls, max_n=100)
                 else:
                     print("vertex discovery skipped: monthly budget reached")
@@ -210,9 +241,8 @@ def main():
             print("Discovery error:", e)
 
     # 5) サマリー
-    run_id = os.getenv("RUN_ID","")
-    if run_id:
-        try: print_run_summary(run_id)
+    if RUN_ID:
+        try: print_run_summary(RUN_ID)
         except Exception as e: print("summary error:", e)
 
     print("Done in", int(time.time() - start), "sec")
