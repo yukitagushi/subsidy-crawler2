@@ -9,7 +9,6 @@ from lib.http_client import conditional_fetch
 from lib.extractors import extract_from_html, extract_from_text
 from lib.db import conn, upsert_http_meta, upsert_page, log_fetch, ensure_schema
 
-# 任意：Tavily raw fallback（Secretsに TAVILY_API_KEY があれば使う）
 try:
     from tavily import TavilyClient
 except Exception:
@@ -87,12 +86,13 @@ def process_detail(u:str, deadline:float)->None:
         try:
             with conn() as c:
                 cur=c.cursor()
-                cur.execute("select etag, last_modified from public.http_cache where url=%s",(u,))
+                cur.execute("select etag, last_modified from public.http_cache where url=%s",(u,), prepare=False)
                 petag,plm=cur.fetchone() or (None,None)
                 html,new_etag,new_lm,ctype,status,took=conditional_fetch(u,petag,plm)
                 upsert_http_meta(c,u,new_etag,new_lm,status)
                 if html is None: L(c,u,"304",took,None); return
-                if ctype and ctype.lower() not in DOC_TYPES: L(c,u,"skip",took,f"ctype={ctype}"); return
+                if ctype and ctype.lower() not in DOC_TYPES:
+                    L(c,u,"skip",took,f"ctype={ctype}"); return
                 row=extract_from_html(u,html)
                 changed=upsert_page(c,row)
                 L(c,u,"ok" if changed else "skip",took,None)
@@ -130,7 +130,7 @@ def crawl()->None:
             max_new=int(src.get("max_new",20))
 
             cur=c_main.cursor()
-            cur.execute("select etag, last_modified from public.http_cache where url=%s",(list_url,))
+            cur.execute("select etag, last_modified from public.http_cache where url=%s",(list_url,), prepare=False)
             etag,lm=cur.fetchone() or (None,None)
             html=None; ctype=None
             try:
