@@ -17,9 +17,15 @@ jobs:
       - name: Run orchestrator
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BING_SEARCH_KEY: ${{ secrets.BING_SEARCH_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
+          RUN_ID: ${{ github.run_id }}
 
-          # 速攻モード（3分）：並列・短めタイムアウト
+          # 無料枠ガード（例：月9000、1Run=50）
+          VERTEX_Q_MONTH_LIMIT: "9000"
+          VERTEX_Q_PER_RUN: "50"
+
+          # 速攻モード（3分で増やす）
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "25"
           CHUSHO_READ_TIMEOUT: "35"
@@ -28,6 +34,28 @@ jobs:
           MAX_PER_DOMAIN: "20"
           PARALLEL_WORKERS: "6"
           PER_HOST_LIMIT: "2"
-          USE_TAVILY_DISCOVERY: "1"
-          # TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: python orchestrator.py
+
+      - name: Summarize last run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os, psycopg, textwrap
+          dsn=os.getenv("DATABASE_URL"); run=os.getenv("RUN_ID")
+          with psycopg.connect(dsn, autocommit=True) as c, c.cursor() as cur:
+              cur.execute("""
+                select status, count(*) from public.fetch_log
+                 where error like %s group by status order by status
+              """, (f"run={run};%",))
+              rows=cur.fetchall()
+              cur.execute("""
+                select sum((regexp_match(error,'candidates=([0-9]+)'))[1]::int)
+                  from public.fetch_log where status='list' and error like %s
+              """, (f"run={run};%",))
+              cand = cur.fetchone()[0] or 0
+          md=textwrap.dedent(f"## Crawl Summary (run {run})\n- Candidates discovered: **{cand}**\n- Status counts:\n")
+          for s,n in rows: md += f"  - {s}: **{n}**\n"
+          open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8').write(md)
+          PY
