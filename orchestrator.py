@@ -10,14 +10,20 @@ from crawl_incremental import crawl as lane_crawl
 VERTEX_Q_MONTH_LIMIT = int(os.getenv("VERTEX_Q_MONTH_LIMIT", "9000"))
 VERTEX_Q_PER_RUN     = int(os.getenv("VERTEX_Q_PER_RUN", "50"))
 
+# ウォッチドッグ（この秒数で必ず main を抜ける）
+HARD_KILL_SEC = int(os.getenv("HARD_KILL_SEC", "600"))
+
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
-def quick_prefetch(urls, max_n=8):
-    """Discovery候補から少数だけ先に保存: 3分ランでも確実に増やすための前座。"""
+def time_left(deadline: float) -> float:
+    return max(0.0, deadline - time.time())
+
+def quick_prefetch(urls, max_n=8, deadline=float("inf")):
+    """Discovery候補から少数だけ保存: 3分ランでも確実に増やす前座。"""
     taken = 0
     with conn() as c:
         for u in urls:
-            if taken >= max_n:
+            if taken >= max_n or time_left(deadline) < 5:
                 break
             try:
                 html, etag, lm, ctype, status, took = conditional_fetch(u, None, None)
@@ -34,38 +40,48 @@ def quick_prefetch(urls, max_n=8):
                 log_fetch(c, u, "ng", 0, f"prefetch error: {e}")
 
 def main():
-    t0 = time.time()
+    start = time.time()
+    deadline = start + HARD_KILL_SEC
 
-    # ★ まずスキーマを適用（api_quota のリネーム等もここで走る）
+    # 1) スキーマ適用（api_quota の移行もここで実施）
     ensure_schema()
 
-    # A: RSS
+    # 2) RSS（軽いので先に）
+    if time_left(deadline) < 5: 
+        print("watchdog: deadline before RSS"); 
+        return
     try:
         set_monthly_limit("vertex", VERTEX_Q_MONTH_LIMIT)
         lane_rss()
     except Exception as e:
         print("RSS lane error:", e)
 
-    # B: Discovery（searchLite）→ 予算に余裕がある時だけ実行
+    # 3) Discovery（予算に余裕がある時だけ）
     extra = []
+    if time_left(deadline) < 5: 
+        print("watchdog: deadline before discovery"); 
+        return
     try:
         if can_spend("vertex", VERTEX_Q_PER_RUN):
             extra = v_discover(query="補助金 公募 申請 2025", page_size=25, max_pages=2)
             add_usage("vertex", VERTEX_Q_PER_RUN)
             print("vertex discovery candidates:", len(extra))
-            quick_prefetch(extra, max_n=8)
+            quick_prefetch(extra, max_n=8, deadline=deadline)
         else:
             print("vertex discovery skipped: monthly budget reached")
     except Exception as e:
         print("Vertex discovery error:", e)
 
-    # C: 並列クロール
+    # 4) 並列クロール（残り時間が無ければスキップ）
+    if time_left(deadline) < 5:
+        print("watchdog: skip crawl (deadline reached)")
+        return
     try:
         lane_crawl()
     except Exception as e:
         print("Crawl lane error:", e)
 
-    print("Done in", int(time.time() - t0), "sec")
+    print("Done in", int(time.time() - start), "sec")
 
 if __name__ == "__main__":
     main()
