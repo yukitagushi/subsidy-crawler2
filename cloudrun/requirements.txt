@@ -1,6 +1,3 @@
-requests
-beautifulsoup4
+functions-framework==3.*
+openai>=1.13.3
 psycopg[binary]>=3.1.18,<3.3
-feedparser
-tavily-python
-PyYAML
