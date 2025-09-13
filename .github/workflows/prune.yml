@@ -12,6 +12,7 @@ jobs:
       - run: python -m pip install -U pip
       - run: pip install "psycopg[binary]>=3.1.18,<3.3"
       - name: Apply schema
+        env: { DATABASE_URL: ${{ secrets.DATABASE_URL }} }
         run: |
           python - <<'PY'
           import os, psycopg, pathlib
@@ -20,6 +21,3 @@ jobs:
               c.execute(pathlib.Path("schema.sql").read_text())
           print("schema applied")
           PY
-        env: { DATABASE_URL: ${{ secrets.DATABASE_URL }} }
-      - name: Run prune (no-op placeholder)
-        run: python - <<'PY'\nprint("prune done")\nPY
