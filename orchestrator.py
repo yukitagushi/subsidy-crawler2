@@ -9,8 +9,8 @@ from lanes.lane_search_vertex import discover as v_discover
 from crawl_incremental import crawl as lane_crawl
 
 # ---- 無料枠ガード（ENV で調整）----
-VERTEX_Q_MONTH_LIMIT = int(os.getenv("VERTEX_Q_MONTH_LIMIT", "9000"))  # 月間の許容量（無料枠1万の手前）
-VERTEX_Q_PER_RUN     = int(os.getenv("VERTEX_Q_PER_RUN", "50"))        # 1Run あたり想定消費（pageSize×pages など）
+VERTEX_Q_MONTH_LIMIT = int(os.getenv("VERTEX_Q_MONTH_LIMIT", "9000"))
+VERTEX_Q_PER_RUN     = int(os.getenv("VERTEX_Q_PER_RUN", "50"))
 
 # ---- ウォッチドッグ（この秒数を超えたら必ず main() を終了）----
 HARD_KILL_SEC = int(os.getenv("HARD_KILL_SEC", "600"))  # 10分
@@ -19,14 +19,9 @@ HARD_KILL_SEC = int(os.getenv("HARD_KILL_SEC", "600"))  # 10分
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
 def time_left(deadline: float) -> float:
-    """終了までの残秒（負値は0に丸め）"""
     return max(0.0, deadline - time.time())
 
 def quick_prefetch(urls, max_n: int = 2, deadline: float = float("inf")):
-    """
-    Discovery の候補を “少数だけ” 先に軽量取得して保存。
-    crawl 後の短い残り時間でも pages を確実に少し増やすための前座。
-    """
     taken = 0
     with conn() as c:
         for u in urls:
@@ -46,47 +41,83 @@ def quick_prefetch(urls, max_n: int = 2, deadline: float = float("inf")):
             except Exception as e:
                 log_fetch(c, u, "ng", 0, f"prefetch error: {e}")
 
+def print_run_summary(run_id: str):
+    """ok 件数と pages 件数を安全に出力（%は使わない・NULL安全）"""
+    with conn() as c, c.cursor() as cur:
+        # pages 件数（sentinel除外）
+        cur.execute(
+            "select count(*) from public.pages where url not like 'https://example.com/sentinel%'", (),
+            prepare=False
+        )
+        pages_after = cur.fetchone()[0] or 0
+
+        # このRUNのステータス別件数（POSITION で部分一致）
+        cur.execute(
+            """
+            select status, count(*)
+              from public.fetch_log
+             where position('run='||%s||';' in coalesce(error,'')) > 0
+             group by status
+            """,
+            (run_id,), prepare=False
+        )
+        counts = {k: v for k, v in cur.fetchall()}
+
+        # candidates 合計
+        cur.execute(
+            """
+            select coalesce(sum((regexp_match(coalesce(error,''),'candidates=([0-9]+)'))[1]::int),0)
+              from public.fetch_log
+             where status='list' and position('run='||%s||';' in coalesce(error,'')) > 0
+            """,
+            (run_id,), prepare=False
+        )
+        cand = cur.fetchone()[0] or 0
+
+    print(f"SUMMARY run={run_id}: candidates={cand}, ok={counts.get('ok',0)}, "
+          f"304={counts.get('304',0)}, skip={counts.get('skip',0)}, ng={counts.get('ng',0)}, "
+          f"pages_non_sentinel={pages_after}")
+
 def main():
     start = time.time()
     deadline = start + HARD_KILL_SEC
 
-    # 1) スキーマ適用（api_quota の移行もここで走る）
+    # 1) スキーマ適用
     ensure_schema()
 
-    # 2) RSS（軽いので先に）
-    if time_left(deadline) < 5:
-        print("watchdog: deadline before RSS"); return
+    # 2) RSS
+    if time_left(deadline) < 5: print("watchdog: deadline before RSS"); return
     try:
-        set_monthly_limit("vertex", VERTEX_Q_MONTH_LIMIT)  # 月次上限（無料枠）をセット
+        set_monthly_limit("vertex", VERTEX_Q_MONTH_LIMIT)
         lane_rss()
     except Exception as e:
         print("RSS lane error:", e)
 
-    # 3) ★ crawl 本体を先に回す（必ず取り込む）
-    if time_left(deadline) < 5:
-        print("watchdog: skip crawl (deadline reached before crawl)"); return
+    # 3) crawl 本体（必ず回す）
+    if time_left(deadline) < 5: print("watchdog: skip crawl (deadline reached before crawl)"); return
     try:
         lane_crawl()
     except Exception as e:
         print("Crawl lane error:", e)
 
-    # 4) 残り時間があれば Discovery（searchLite）→ 先読み（prefetch）
-    if time_left(deadline) < 5:
-        print("watchdog: deadline before discovery"); return
-
+    # 4) 残り時間で Discovery → 先読み
+    if time_left(deadline) < 5: print("watchdog: deadline before discovery"); return
     extra = []
     try:
         if can_spend("vertex", VERTEX_Q_PER_RUN):
-            # 軽めに1ページだけ取得（最大25件）
             extra = v_discover(query="補助金 公募 申請 2025", page_size=25, max_pages=1)
             add_usage("vertex", VERTEX_Q_PER_RUN)
             print("vertex discovery candidates:", len(extra))
-            # 先読みは 2 件だけ（短時間で完了するように）
             quick_prefetch(extra, max_n=2, deadline=deadline)
         else:
             print("vertex discovery skipped: monthly budget reached")
     except Exception as e:
         print("Vertex discovery error:", e)
+
+    # 5) サマリー（Run ID は Actions から渡される）
+    run_id = os.getenv("RUN_ID","")
+    if run_id:
+        print_run_summary(run_id)
 
     print("Done in", int(time.time() - start), "sec")
 
