@@ -1,0 +1,20 @@
+name: vertex-test
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl searchLite
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
+        run: |
+          set -e
+          echo "SERVING_CONFIG=${VERTEX_SERVING_CONFIG}"
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-goog-api-key: ${GOOGLE_API_KEY}" \
+            "https://discoveryengine.googleapis.com/v1/${VERTEX_SERVING_CONFIG}:searchLite" \
+            -d "{\"servingConfig\":\"${VERTEX_SERVING_CONFIG}\",\"query\":\"補助金 公募 2025\",\"pageSize\":5}" \
+            | head -c 400
