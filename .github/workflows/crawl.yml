@@ -6,31 +6,31 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 12            # ← ジョブ全体の上限（12分で強制終了）
+    timeout-minutes: 12
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with: { python-version: "3.11", cache: "pip" }
+
       - run: python -m pip install -U pip setuptools wheel
       - run: pip install -r requirements.txt
 
       - name: Run orchestrator
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-          # Vertex discovery
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
 
-          # 無料枠ガード（例：月9000 / 1run=50）
+          # 無料枠ガード
           VERTEX_Q_MONTH_LIMIT: "9000"
           VERTEX_Q_PER_RUN: "50"
 
-          # ★ ウォッチドッグ：10分を越えたら必ず main() を抜ける
+          # ウォッチドッグ（10分）
           HARD_KILL_SEC: "600"
 
-          # 速攻モード（3分で増やす）
+          # 速攻モード（3分）
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "25"
           CHUSHO_READ_TIMEOUT: "35"
@@ -42,3 +42,41 @@ jobs:
 
           RUN_ID: ${{ github.run_id }}
         run: python orchestrator.py
+
+      # 直近の RUN の “ok 件数” と “pages増分” を Summary に出す
+      - name: Summarize last run (ok & pages delta)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os, psycopg, textwrap
+          dsn=os.getenv("DATABASE_URL"); run=os.getenv("RUN_ID")
+          with psycopg.connect(dsn, autocommit=True) as c, c.cursor() as cur:
+              # 直前の pages 件数（sentinel除外）
+              cur.execute("select count(*) from public.pages where url not like 'https://example.com/sentinel%'", ())
+              pages_after = cur.fetchone()[0] or 0
+
+              # このRUNの ok 件数 / list候補数
+              cur.execute("""
+                select status, count(*) from public.fetch_log
+                 where error like %s
+                 group by status
+              """, (f"run={run};%",))
+              counts = {k:v for k,v in cur.fetchall()}
+
+              cur.execute("""
+                select sum( (regexp_match(error,'candidates=([0-9]+)'))[1]::int )
+                  from public.fetch_log
+                 where status='list' and error like %s
+              """, (f"run={run};%",))
+              cand = cur.fetchone()[0] or 0
+
+          md = textwrap.dedent(f"""
+          ## Crawl Summary (run {run})
+          - Candidates discovered: **{cand}**
+          - ok: **{counts.get('ok',0)}** / 304: {counts.get('304',0)} / skip: {counts.get('skip',0)} / ng: {counts.get('ng',0)} / list: {counts.get('list',0)}
+          - pages (non-sentinel) after run: **{pages_after}**
+          """)
+          open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8').write(md)
+          PY
