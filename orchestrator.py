@@ -118,7 +118,7 @@ def process_one(url: str) -> bool:
         html, etag, lm, ctype, status, took = conditional_fetch(
             url, None, None,
             override_connect=None,
-            override_read=SINGLE_STAGE1_READ_TIMEOUT  # ← ここがポイント
+            override_read=SINGLE_STAGE1_READ_TIMEOUT
         )
         with conn() as c:
             upsert_http_meta(c, url, etag, lm, status)
