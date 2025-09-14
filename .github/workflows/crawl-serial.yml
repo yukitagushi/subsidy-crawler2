@@ -38,7 +38,8 @@ jobs:
 
           # === じっくり待つ＆DRフォールバック ===
           SINGLE_FORCE_READ_TIMEOUT: "300"   # ← 中小でも READ を 300 秒まで上書き
-          DR_FETCH_ON_SERIAL: "1"            # ← Deep Research で本文抽出をフォールバック
+          DR_FETCH_ON_SERIAL: "1"   
+          SINGLE_FORCE_CONNECT_TIMEOUT: "30"   # ← 接続確立まで 30 秒待つ（既定12秒 → 緩和）# ← Deep Research で本文抽出をフォールバック
 
           # === タイムアウト保険（CONNECTは短め・READは上の強制値を使用） ===
           HARD_KILL_SEC: "600"
