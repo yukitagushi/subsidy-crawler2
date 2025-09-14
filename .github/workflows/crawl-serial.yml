@@ -2,11 +2,10 @@ name: Crawl Serial (one-by-one)
 
 on:
   schedule:
-    # 5分おき（UTC）。JSTで日中だけにしたい場合は 0-9 のように調整してください
-    - cron: "*/5 * * * *"
+    - cron: "*/5 * * * *"     # 5分おき（UTC）。JSTの時間帯だけ走らせるなら 0-9 など範囲指定に変更
   workflow_dispatch: {}
 
-# ← 直列キューに変更（新しい実行は待機し、今の実行はキャンセルしない）
+# 直列実行：新しい実行は待機し、今の実行をキャンセルしない
 concurrency:
   group: crawl-serial
   cancel-in-progress: false
@@ -35,23 +34,25 @@ jobs:
 
           # === シリアルで1件ずつ ===
           SINGLE_BACKFILL_ONE: "1"
-          SINGLE_MAX_TRY: "2"                  # 12分上限内に収めるため 2 に（必要なら 1 に）
-          # 3分待ってダメなら DR に切替（Stage1）
+          SINGLE_MAX_TRY: "1"               # ← 必ず1件だけ。12分に確実に収まる
+          # 3分待ってダメならDR（Stage1）
           SINGLE_STAGE1_READ_TIMEOUT: "180"
 
-          # === DR フォールバック有効 ===
+          # === DR フォールバック ===
           DR_FETCH_ON_SERIAL: "1"
 
           # === 接続失敗対策 ===
           SINGLE_FORCE_CONNECT_TIMEOUT: "30"
 
-          # === HEAD プリフライト（短時間でPDF/巨大を判定） ===
+          # === HEADプリフライト（PDF/巨大を早期判定） ===
           HEAD_CONNECT_TIMEOUT: "8"
           HEAD_READ_TIMEOUT: "6"
-          SINGLE_LARGE_BYTES: "8000000"        # 8MB 以上は DR 抽出へ
+          SINGLE_LARGE_BYTES: "8000000"     # 8MB以上はDRへ
 
-          # === 安全装置 ===
-          HARD_KILL_SEC: "600"                 # 10分
+          # === 内部ウォッチドッグ：ジョブ上限に余裕を持たせる（9分で強制終了） ===
+          HARD_KILL_SEC: "540"
+
+          # 既定（保険）
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "60"
 
