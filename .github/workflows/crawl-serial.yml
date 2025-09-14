@@ -2,13 +2,13 @@ name: Crawl Serial (one-by-one)
 
 on:
   schedule:
-    # 5分おき（UTC）。JSTで日中だけにしたい場合は 0-8, 0-14 等に調整してください
+    # 5分おき（UTC）。JSTで日中だけにしたい場合は 0-9 のように調整
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 concurrency:
   group: crawl-serial
-  cancel-in-progress: true   # 前の実行が残っていたらキャンセルし最新だけにする
+  cancel-in-progress: true
 
 jobs:
   crawl:
@@ -32,19 +32,27 @@ jobs:
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-          # === シリアル処理モード（1件ずつ確実に） ===
-          SINGLE_BACKFILL_ONE: "1"        # ← シリアルモードON
-          SINGLE_MAX_TRY: "5"             # ← 取れるまで最大5件まで順に試す
+          # === シリアル処理モード ===
+          SINGLE_BACKFILL_ONE: "1"         # 1件ずつ
+          SINGLE_MAX_TRY: "5"              # 取れるまで最大5件まで順に試す
 
-          # === じっくり待つ＆DRフォールバック ===
-          SINGLE_FORCE_READ_TIMEOUT: "300"   # ← 中小でも READ を 300 秒まで上書き
-          DR_FETCH_ON_SERIAL: "1"   
-          SINGLE_FORCE_CONNECT_TIMEOUT: "30"   # ← 接続確立まで 30 秒待つ（既定12秒 → 緩和）# ← Deep Research で本文抽出をフォールバック
+          # === 「3分でDR切替」関連 ===
+          SINGLE_STAGE1_READ_TIMEOUT: "180"   # ← 3分。まずはこのREADで試す
+          SINGLE_FORCE_CONNECT_TIMEOUT: "30"  # 接続は最大30sまで粘る
+          DR_FETCH_ON_SERIAL: "1"             # DRフォールバックを有効
 
-          # === タイムアウト保険（CONNECTは短め・READは上の強制値を使用） ===
+          # === 予備（Stage2でもう少し粘りたい場合の上限、今回は未使用でもOK） ===
+          SINGLE_FORCE_READ_TIMEOUT: "300"    # 5分（コード内ではStage1失敗で即DRに行く）
+
+          # === HEADプリフライト（短時間） ===
+          HEAD_CONNECT_TIMEOUT: "8"
+          HEAD_READ_TIMEOUT: "6"
+          SINGLE_LARGE_BYTES: "8000000"       # 8MB以上はDRへ
+
+          # === 安全装置 ===
           HARD_KILL_SEC: "600"
           CONNECT_TIMEOUT: "8"
-          READ_TIMEOUT: "60"             # 通常READ（シリアル時は SINGLE_FORCE_READ_TIMEOUT が優先）
+          READ_TIMEOUT: "60"
 
           RUN_ID: ${{ github.run_id }}
         run: python orchestrator.py
