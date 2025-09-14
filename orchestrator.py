@@ -10,19 +10,17 @@ from lib.extractors import extract_from_html, norm_ws, clip
 from lanes.lane_search_openai import dr_fetch_text  # DRでURL本文を読む
 
 # ==== シリアルモードのENV ====
-HARD_KILL_SEC           = int(os.getenv("HARD_KILL_SEC", "600"))
-SINGLE_BACKFILL_ONE     = os.getenv("SINGLE_BACKFILL_ONE", "0") == "1"
-SINGLE_MAX_TRY          = int(os.getenv("SINGLE_MAX_TRY", "5"))
-RUN_ID                  = os.getenv("RUN_ID", "")
+HARD_KILL_SEC               = int(os.getenv("HARD_KILL_SEC", "600"))
+SINGLE_BACKFILL_ONE         = os.getenv("SINGLE_BACKFILL_ONE", "0") == "1"
+SINGLE_MAX_TRY              = int(os.getenv("SINGLE_MAX_TRY", "5"))
+SINGLE_STAGE1_READ_TIMEOUT  = int(os.getenv("SINGLE_STAGE1_READ_TIMEOUT", "180"))  # ← 3分
+DR_FETCH_ON_SERIAL          = os.getenv("DR_FETCH_ON_SERIAL", "1") == "1"
+RUN_ID                      = os.getenv("RUN_ID", "")
 
-# DR フォールバック（ON推奨）
-DR_FETCH_ON_SERIAL      = os.getenv("DR_FETCH_ON_SERIAL", "1") == "1"
-
-# 巨大判定（これ以上はDR抽出へ切替）
-LARGE_BYTES_THRESHOLD   = int(os.getenv("SINGLE_LARGE_BYTES", "8000000"))  # 8MB
-# HEAD のタイムアウト（短め）
-HEAD_CONNECT_TIMEOUT    = int(os.getenv("HEAD_CONNECT_TIMEOUT", "8"))
-HEAD_READ_TIMEOUT       = int(os.getenv("HEAD_READ_TIMEOUT", "10"))
+# 巨大判定（これ以上はDRへ）
+LARGE_BYTES_THRESHOLD       = int(os.getenv("SINGLE_LARGE_BYTES", "8000000"))  # 8MB
+HEAD_CONNECT_TIMEOUT        = int(os.getenv("HEAD_CONNECT_TIMEOUT", "8"))
+HEAD_READ_TIMEOUT           = int(os.getenv("HEAD_READ_TIMEOUT", "6"))
 
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
@@ -73,10 +71,6 @@ def _upsert_text_as_summary(url: str, text: str) -> bool:
         return upsert_page(c, row)
 
 def head_preflight(url: str):
-    """
-    短時間のHEADで Content-Type / Content-Length を取得。
-    取れなくても None を返し、以降のGET/DRに委ねる。
-    """
     try:
         r = requests.head(
             url, allow_redirects=True,
@@ -91,18 +85,24 @@ def head_preflight(url: str):
         return None, None
 
 def process_one(url: str) -> bool:
-    """1件だけ処理。成功で True"""
-    # 0) 先に HEAD で軽く見てから戦略を決める
+    """
+    1件だけ処理：
+      0) HEADで軽く判定（PDF/巨大→DR or PDFタイトル更新）
+      1) Stage1: READ=3分でGET。ReadTimeoutなら即DRに切替
+      2) HTML抽出 or PDFタイトル更新
+      3) 失敗/不足はDRで本文抽出
+    """
+    # 0) HEAD プリフライト
     ct_head, size_head = head_preflight(url)
 
-    # PDF は本文GETせずタイトル更新（無題脱出を優先）
+    # PDF は本文GETせずタイトル更新
     if ct_head == "application/pdf":
         with conn() as c:
             changed = upsert_page(c, _row_from_pdf(url))
             log_run(c, url, "ok" if changed else "skip", 0, "single head: pdf")
         return changed
 
-    # 巨大ファイルは DR でテキスト抽出（コスト安定・応答確実）
+    # 巨大は DR 抽出
     if size_head and size_head >= LARGE_BYTES_THRESHOLD and DR_FETCH_ON_SERIAL:
         txt = dr_fetch_text(url, max_chars=6000)
         with conn() as c:
@@ -113,15 +113,19 @@ def process_one(url: str) -> bool:
             else:
                 log_run(c, url, "skip", 0, f"single head: large->{size_head} dr-fetch none")
 
-    # 1) ここからは通常どおり GET（lib/http_client 側でシリアル強制READが効く）
+    # 1) Stage1 GET（READ=3分）
     try:
-        html, etag, lm, ctype, status, took = conditional_fetch(url, None, None)
+        html, etag, lm, ctype, status, took = conditional_fetch(
+            url, None, None,
+            override_connect=None,
+            override_read=SINGLE_STAGE1_READ_TIMEOUT  # ← ここがポイント
+        )
         with conn() as c:
             upsert_http_meta(c, url, etag, lm, status)
 
         ct = (ctype or "").lower()
+
         if html is None:
-            with conn() as c: log_run(c, url, "304", took, "single get")
             # 304 → DR
             if DR_FETCH_ON_SERIAL:
                 txt = dr_fetch_text(url, max_chars=6000)
@@ -143,10 +147,11 @@ def process_one(url: str) -> bool:
                     changed = upsert_page(c, _row_from_pdf(pdf_url))
                     log_run(c, url, "ok" if changed else "skip", took, "single html->pdf meta refresh")
                 return changed
-            # 通常HTML抽出
+
+            # HTML抽出
             with conn() as c:
                 changed = upsert_page(c, extract_from_html(url, html))
-                log_run(c, url, "ok" if changed else "skip", took, f"single html ctype={ct} status={status}")
+                log_run(c, url, "ok" if changed else "skip", took, f"single html stage1 status={status}")
             if not changed and DR_FETCH_ON_SERIAL:
                 txt = dr_fetch_text(url, max_chars=6000)
                 with conn() as c:
@@ -161,7 +166,7 @@ def process_one(url: str) -> bool:
         if ct == "application/pdf":
             with conn() as c:
                 changed = upsert_page(c, _row_from_pdf(url))
-                log_run(c, url, "ok" if changed else "skip", took, f"single pdf status={status}")
+                log_run(c, url, "ok" if changed else "skip", took, f"single pdf stage1")
             return changed
 
         # その他 → DR
@@ -174,6 +179,19 @@ def process_one(url: str) -> bool:
                     return changed
                 else:
                     log_run(c, url, "skip", 0, f"single dr-fetch none ctype={ct}")
+        return False
+
+    except requests.exceptions.ReadTimeout:
+        # ★ 3分でタイムアウト → 即DRへ
+        if DR_FETCH_ON_SERIAL:
+            txt = dr_fetch_text(url, max_chars=6000)
+            with conn() as c:
+                if txt:
+                    changed = _upsert_text_as_summary(url, txt)
+                    log_run(c, url, "ok" if changed else "skip", 0, "single stage1 ReadTimeout -> dr-fetch")
+                    return changed
+                else:
+                    log_run(c, url, "skip", 0, "single stage1 ReadTimeout -> dr-fetch none")
         return False
 
     except Exception as e:
