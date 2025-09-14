@@ -2,8 +2,7 @@ name: Crawl Serial (one-by-one)
 
 on:
   schedule:
-    # 5分おき（UTC）。JSTで日中だけにしたい場合は 0-9 のように調整
-    - cron: "*/5 * * * *"
+    - cron: "*/5 * * * *"     # 5分おき（UTC）
   workflow_dispatch: {}
 
 concurrency:
@@ -26,30 +25,28 @@ jobs:
 
       - name: Run orchestrator (serial one-by-one)
         env:
-          # === Secrets ===
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-          # === シリアル処理モード ===
-          SINGLE_BACKFILL_ONE: "1"         # 1件ずつ
-          SINGLE_MAX_TRY: "5"              # 取れるまで最大5件まで順に試す
+          # ---- シリアルで1件ずつ ----
+          SINGLE_BACKFILL_ONE: "1"
+          SINGLE_MAX_TRY: "2"               # ← 5 → 2（最大2件までに制限）
 
-          # === 「3分でDR切替」関連 ===
-          SINGLE_STAGE1_READ_TIMEOUT: "180"   # ← 3分。まずはこのREADで試す
-          SINGLE_FORCE_CONNECT_TIMEOUT: "30"  # 接続は最大30sまで粘る
-          DR_FETCH_ON_SERIAL: "1"             # DRフォールバックを有効
+          # ---- 3分でDR切替（Stage1）----
+          SINGLE_STAGE1_READ_TIMEOUT: "180" # = 3分
 
-          # === 予備（Stage2でもう少し粘りたい場合の上限、今回は未使用でもOK） ===
-          SINGLE_FORCE_READ_TIMEOUT: "300"    # 5分（コード内ではStage1失敗で即DRに行く）
+          # ---- 接続失敗対策 ----
+          SINGLE_FORCE_CONNECT_TIMEOUT: "30"
+          DR_FETCH_ON_SERIAL: "1"
 
-          # === HEADプリフライト（短時間） ===
+          # ---- HEADプリフライト ----
           HEAD_CONNECT_TIMEOUT: "8"
           HEAD_READ_TIMEOUT: "6"
-          SINGLE_LARGE_BYTES: "8000000"       # 8MB以上はDRへ
+          SINGLE_LARGE_BYTES: "8000000"     # 8MB以上はDRへ
 
-          # === 安全装置 ===
+          # ---- 安全装置（12分上限に収める）----
           HARD_KILL_SEC: "600"
           CONNECT_TIMEOUT: "8"
           READ_TIMEOUT: "60"
