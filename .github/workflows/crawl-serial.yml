@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: crawl-serial
-  cancel-in-progress: true
+  cancel-in-progress: true   # 前の実行が残っていたらキャンセルし最新だけにする
 
 jobs:
   crawl:
@@ -26,18 +26,24 @@ jobs:
 
       - name: Run orchestrator (serial one-by-one)
         env:
+          # === Secrets ===
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           VERTEX_SERVING_CONFIG: ${{ secrets.VERTEX_SERVING_CONFIG }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-          # シリアル処理モードを有効化（1件だけ処理・crawl/discoveryはスキップ）
-          SINGLE_BACKFILL_ONE: "1"
+          # === シリアル処理モード（1件ずつ確実に） ===
+          SINGLE_BACKFILL_ONE: "1"        # ← シリアルモードON
+          SINGLE_MAX_TRY: "5"             # ← 取れるまで最大5件まで順に試す
 
-          # タイムアウトは保険（1件なので既定のままでOK）
+          # === じっくり待つ＆DRフォールバック ===
+          SINGLE_FORCE_READ_TIMEOUT: "300"   # ← 中小でも READ を 300 秒まで上書き
+          DR_FETCH_ON_SERIAL: "1"            # ← Deep Research で本文抽出をフォールバック
+
+          # === タイムアウト保険（CONNECTは短め・READは上の強制値を使用） ===
           HARD_KILL_SEC: "600"
-          READ_TIMEOUT: "60"
-          CHUSHO_READ_TIMEOUT: "90"
+          CONNECT_TIMEOUT: "8"
+          READ_TIMEOUT: "60"             # 通常READ（シリアル時は SINGLE_FORCE_READ_TIMEOUT が優先）
 
           RUN_ID: ${{ github.run_id }}
         run: python orchestrator.py
