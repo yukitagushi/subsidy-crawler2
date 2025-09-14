@@ -1,6 +1,9 @@
 import os
+import sys
 import time
 import re
+import argparse
+import logging
 import requests
 from urllib.parse import urlparse
 
@@ -9,19 +12,24 @@ from lib.http_client import conditional_fetch
 from lib.extractors import extract_from_html, norm_ws, clip
 from lanes.lane_search_openai import dr_fetch_text  # DRでURL本文を読む
 
-# ==== シリアルモードのENV ====
+# ==== シリアル/実行モード関連 ENV ====
 HARD_KILL_SEC               = int(os.getenv("HARD_KILL_SEC", "600"))
-SINGLE_BACKFILL_ONE         = os.getenv("SINGLE_BACKFILL_ONE", "0") == "1"
+SINGLE_BACKFILL_ONE         = os.getenv("SINGLE_BACKFILL_ONE", "0") == "1"   # 既定は無効
 SINGLE_MAX_TRY              = int(os.getenv("SINGLE_MAX_TRY", "5"))
 SINGLE_STAGE1_READ_TIMEOUT  = int(os.getenv("SINGLE_STAGE1_READ_TIMEOUT", "180"))  # ← 3分
 DR_FETCH_ON_SERIAL          = os.getenv("DR_FETCH_ON_SERIAL", "1") == "1"
-RUN_ID                      = os.getenv("RUN_ID", "")
+
+# RUN_ID: 未設定なら実行時刻で自動採番（サマリ集計のため常時付与）
+RUN_ID = os.getenv("RUN_ID")
+if not RUN_ID:
+    RUN_ID = str(int(time.time()))
 
 # 巨大判定（これ以上はDRへ）
 LARGE_BYTES_THRESHOLD       = int(os.getenv("SINGLE_LARGE_BYTES", "8000000"))  # 8MB
 HEAD_CONNECT_TIMEOUT        = int(os.getenv("HEAD_CONNECT_TIMEOUT", "8"))
 HEAD_READ_TIMEOUT           = int(os.getenv("HEAD_READ_TIMEOUT", "6"))
 
+# 取り回し上の既定
 DOC_TYPES = {"text/html", "application/xhtml+xml", "application/pdf"}
 
 def time_left(deadline: float) -> float:
@@ -207,7 +215,8 @@ def process_one(url: str) -> bool:
                     log_run(c, url, "ng", 0, f"single error: {type(e).__name__}: {e}; dr-fetch none")
                     return False
         else:
-            with conn() as c: log_run(c, url, "ng", 0, f"single error: {type(e).__name__}: {e}")
+            with conn() as c:
+                log_run(c, url, "ng", 0, f"single error: {type(e).__name__}: {e}")
             return False
 
 def print_run_summary():
@@ -233,10 +242,92 @@ def print_run_summary():
           f"list={counts.get('list',0)}, seed={counts.get('seed',0)}, "
           f"pages_non_sentinel={pages_after}")
 
+# ========= 追加: 引数パース & 自己診断 & 簡易通常経路 =========
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(prog="orchestrator", add_help=True)
+    sub = p.add_subparsers(dest="cmd")
+
+    p_run = sub.add_parser("run", help="run a normal crawl lane")
+    p_run.add_argument("--lane", choices=["serial","night","deep"], default="night")
+    p_run.add_argument("--batch", type=int, default=int(os.getenv("BATCH_N","10")))
+    p_run.add_argument("--fail-on-seed-zero", action="store_true")
+
+    p_single = sub.add_parser("single", help="process a single url")
+    p_single.add_argument("url")
+
+    sub.add_parser("selfcheck", help="check env/DB connectivity and exit")
+    return p.parse_args(argv)
+
+def selfcheck() -> int:
+    dsn = os.getenv("DATABASE_URL","")
+    has_tv = bool(os.getenv("TAVILY_API_KEY"))
+    allow_fb = os.getenv("ALLOW_FALLBACK","0") == "1"
+    print(f"[SELF CHECK] DB_URL={'set' if dsn else 'missing'} TAVILY={has_tv} FALLBACK={allow_fb}")
+    try:
+        import psycopg
+        with psycopg.connect(dsn) as c, c.cursor() as cur:
+            cur.execute("select 1")
+            cur.fetchone()
+        print("[SELF CHECK] DB ok")
+        return 0
+    except Exception as e:
+        print(f"[SELF CHECK] DB error: {e}")
+        return 2
+
+def run_lane(lane: str, batch: int, deadline: float) -> tuple[int,int,int]:
+    """
+    簡易通常経路：未題/空要約ページを batch 件処理
+    戻り値: (processed, ok_like, errors) ざっくり
+    """
+    urls = pick_untitled_batch(batch)
+    processed = ok_like = errors = 0
+    for u in urls:
+        if time_left(deadline) < 5:
+            break
+        processed += 1
+        try:
+            if process_one(u):
+                ok_like += 1
+        except Exception:
+            errors += 1
+    return processed, ok_like, errors
+
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    ensure_schema()  # 念のため（冪等）
+
     start = time.time()
     deadline = start + HARD_KILL_SEC
 
+    args = parse_args(sys.argv[1:])
+
+    # 自己診断
+    if args.cmd == "selfcheck":
+        rc = selfcheck()
+        print_run_summary()
+        print("Done in", int(time.time() - start), "sec")
+        sys.exit(rc)
+
+    # 単発URL
+    if args.cmd == "single":
+        _ = process_one(args.url)
+        print_run_summary()
+        print("Done in", int(time.time() - start), "sec")
+        return
+
+    # 簡易「通常」ラン
+    if args.cmd == "run":
+        processed, ok_like, errors = run_lane(args.lane, args.batch, deadline)
+        if args.fail_on_seed_zero and processed == 0:
+            logging.error("seed/対象なし（processed=0）")
+            print_run_summary(); print("Done in", int(time.time() - start), "sec")
+            sys.exit(3)
+        print_run_summary()
+        print("Done in", int(time.time() - start), "sec")
+        return
+
+    # 互換: 旧ENVベースのSINGLE_BACKFILL_ONE（指定時のみ）
     if SINGLE_BACKFILL_ONE:
         urls = pick_untitled_batch(max(1, SINGLE_MAX_TRY))
         updated = False
@@ -247,12 +338,12 @@ def main():
                 break
         if not urls: print("single: no untitled/empty-summary rows")
         elif not updated: print("single: tried but no update (ng/skip/304/dr)")
-
         print_run_summary()
         print("Done in", int(time.time() - start), "sec")
         return
 
-    print("normal run path not used in SINGLE_BACKFILL_ONE mode")
+    # どの経路にも合致しないとき（メッセージだけ出す）
+    print("normal run path not implemented here. use: 'single <URL>' or 'run --lane night'")
     print_run_summary()
     print("Done in", int(time.time() - start), "sec")
 
