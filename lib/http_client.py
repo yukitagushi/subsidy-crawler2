@@ -2,17 +2,17 @@ import os, time, requests
 from urllib.parse import urlsplit
 from requests.adapters import HTTPAdapter, Retry
 
-# === 既定タイムアウト（ENV） ===
+# 既定のタイムアウト（ENV）
 CONNECT = int(os.getenv("CONNECT_TIMEOUT", "12"))
 READ    = int(os.getenv("READ_TIMEOUT", "45"))
+# ドメイン別（中小は遅い）
 HOST_READ = { "www.chusho.meti.go.jp": int(os.getenv("CHUSHO_READ_TIMEOUT", "75")) }
 
-# === シリアルRun専用の「強制READ/CONNECTタイムアウト」 ===
+# シリアルRun専用の「強制READ/CONNECT」(秒)
 SINGLE_FORCE_READ_TIMEOUT    = int(os.getenv("SINGLE_FORCE_READ_TIMEOUT", "0"))   # 0=無効
 SINGLE_FORCE_CONNECT_TIMEOUT = int(os.getenv("SINGLE_FORCE_CONNECT_TIMEOUT", "0"))# 0=無効
 SINGLE_MODE                  = os.getenv("SINGLE_BACKFILL_ONE", "0") == "1"
 
-# === 共通ヘッダ（接続拒否を避けるため UA/Accept を堅めに） ===
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"),
@@ -21,9 +21,7 @@ HEADERS = {
     "Connection": "keep-alive",
 }
 
-# === リトライ設定 ===
-#   - シリアル時は connect/read ともに回数を増やし、バックオフも少し長め
-#   - 通常時は従来どおり
+# リトライ設定
 if SINGLE_MODE:
     retry = Retry(
         total=5, connect=5, read=2,
@@ -43,19 +41,20 @@ S = requests.Session()
 A = HTTPAdapter(max_retries=retry, pool_maxsize=32)
 S.mount("https://", A); S.mount("http://", A)
 
-def conditional_fetch(u, etag, last_mod):
+def conditional_fetch(u, etag, last_mod, override_connect=None, override_read=None):
     """
-    GETを実行して本文を返す。
-    - etag/last_mod があれば If-None-Match/If-Modified-Since を付与
-    - シリアル時は SINGLE_FORCE_CONNECT/READ が指定されていればそれを最優先
-    - 次に HOST_READ、最後に既定 READ
+    GET を実行して本文を返す。
+    - override_* が指定されていればその値を使用
+    - なければ（シリアル強制 > HOST別 > 既定）の優先順
     戻り値: (html or None, new_etag, new_last_mod, content_type, status_code, took_ms)
+    例外: requests.exceptions.ReadTimeout / ConnectionError など
     """
     host = urlsplit(u).netloc
 
-    # タイムアウト決定
-    rt = SINGLE_FORCE_READ_TIMEOUT or HOST_READ.get(host, READ)
-    ct = SINGLE_FORCE_CONNECT_TIMEOUT or CONNECT
+    rt = (override_read if override_read is not None
+          else SINGLE_FORCE_READ_TIMEOUT or HOST_READ.get(host, READ))
+    ct = (override_connect if override_connect is not None
+          else SINGLE_FORCE_CONNECT_TIMEOUT or CONNECT)
 
     hdr = dict(HEADERS)
     if etag:     hdr["If-None-Match"] = etag
